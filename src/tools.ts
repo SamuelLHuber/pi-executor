@@ -1,10 +1,10 @@
-import { StringEnum, Type, type Static } from "@mariozechner/pi-ai";
+import { StringEnum, Type, type Static } from "@earendil-works/pi-ai";
 import {
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type { JsonObject, JsonValue } from "./http.ts";
 import type { ResumeAction, ExecutorMcpInspection } from "./mcp-client.ts";
 import { inspectExecutorMcp, withExecutorMcpClient } from "./mcp-client.ts";

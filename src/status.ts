@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getScope } from "./http.ts";
 import type { ExecutorSettings } from "./settings.ts";
 import { findRunningSidecarForCwd } from "./sidecar.ts";

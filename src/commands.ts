@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { JsonObject } from "./http.ts";
 import { resolveExecutorEndpoint } from "./connection.ts";
 import { resolveExecutorSettings, updateExecutorSettings, type SettingsScope } from "./settings.ts";

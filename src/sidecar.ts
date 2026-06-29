@@ -208,10 +208,45 @@ export const createPackagePaths = (
   };
 };
 
+const isMusl = (): boolean => {
+  if (process.platform !== "linux") return false;
+  try {
+    const { existsSync } = require("node:fs");
+    if (existsSync("/etc/alpine-release")) return true;
+    const { spawnSync } = require("node:child_process");
+    const r = spawnSync("ldd", ["--version"], { encoding: "utf8" });
+    if (((r.stdout || "") + (r.stderr || "")).toLowerCase().includes("musl")) return true;
+  } catch {}
+  return false;
+};
+
+const platformPackageName = (): string => {
+  const platformMap: Record<string, string> = { darwin: "darwin", linux: "linux", win32: "windows" };
+  const archMap: Record<string, string> = { x64: "x64", arm64: "arm64" };
+  const platform = platformMap[process.platform] || process.platform;
+  const arch = archMap[process.arch] || process.arch;
+  const base = `executor-${platform}-${arch}`;
+  if (platform === "linux") {
+    return isMusl() ? `${base}-musl` : base;
+  }
+  return base;
+};
+
 export const resolveExecutorPackagePaths = (): PackagePaths => {
   try {
     const packageJsonPath = require.resolve("executor/package.json");
-    return createPackagePaths(packageJsonPath);
+    let runtimePackageJson = packageJsonPath;
+
+    // In executor >= 1.5.x the native binary moved to platform-specific
+    // optionalDependencies packages (e.g. executor-darwin-arm64).
+    try {
+      const platformPkg = platformPackageName();
+      runtimePackageJson = require.resolve(`${platformPkg}/package.json`);
+    } catch {
+      // Fall back to the main executor package root and old bin/runtime path
+    }
+
+    return createPackagePaths(runtimePackageJson);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new SidecarError(
@@ -527,7 +562,7 @@ const attachExitCleanup = (record: SidecarRecord): void => {
 
 const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarRecord> => {
   const runtimePath = await resolveRuntimeBinary();
-  const child = spawn(runtimePath, ["web", "--port", String(port)], {
+  const child = spawn(runtimePath, ["web", "--port", String(port), "--foreground"], {
     cwd,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],

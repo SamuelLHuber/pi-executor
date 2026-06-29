@@ -1,6 +1,6 @@
 {
   "name": "pi-executor",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Pi extension to run executor",
   "keywords": [
     "code-mode",
@@ -9,15 +9,15 @@
     "pi-extension",
     "pi-package"
   ],
-  "homepage": "https://github.com/jeremyosih/pi-executor",
+  "homepage": "https://github.com/SamuelLHuber/pi-executor",
   "bugs": {
-    "url": "https://github.com/jeremyosih/pi-executor/issues"
+    "url": "https://github.com/SamuelLHuber/pi-executor/issues"
   },
   "license": "MIT",
-  "author": "Jeremy Osih",
+  "author": "Jeremy Osih (original), Samuel Huber (fork)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jeremyosih/pi-executor.git"
+    "url": "git+https://github.com/SamuelLHuber/pi-executor.git"
   },
   "files": [
     "src",
@@ -52,8 +52,8 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "^0.66.1"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
   },
   "pi": {
     "extensions": [

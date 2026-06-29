@@ -1,5 +1,7 @@
 # pi-executor
 
+Forked from [jeremyosih/pi-executor](https://github.com/jeremyosih/pi-executor). All credit to the original author.
+
 # Pi MCP Adapter
 
 Use any MCP / OpenAPI or GRAPHQL api with [Pi](https://github.com/badlogic/pi-mono/) securely and without burning your context window. (code-mode)
