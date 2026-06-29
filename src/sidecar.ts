@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
@@ -211,7 +211,6 @@ export const createPackagePaths = (
 const isMusl = (): boolean => {
   if (process.platform !== "linux") return false;
   try {
-    const { existsSync } = require("node:fs");
     if (existsSync("/etc/alpine-release")) return true;
     const { spawnSync } = require("node:child_process");
     const r = spawnSync("ldd", ["--version"], { encoding: "utf8" });
@@ -235,18 +234,29 @@ const platformPackageName = (): string => {
 export const resolveExecutorPackagePaths = (): PackagePaths => {
   try {
     const packageJsonPath = require.resolve("executor/package.json");
-    let runtimePackageJson = packageJsonPath;
 
     // In executor >= 1.5.x the native binary moved to platform-specific
     // optionalDependencies packages (e.g. executor-darwin-arm64).
     try {
       const platformPkg = platformPackageName();
-      runtimePackageJson = require.resolve(`${platformPkg}/package.json`);
+      const runtimePackageJson = require.resolve(`${platformPkg}/package.json`);
+      const platformPkgRoot = dirname(runtimePackageJson);
+      const binaryName = getRuntimeBinaryFileName(process.platform);
+      const runtimePath = join(platformPkgRoot, "bin", binaryName);
+      const installerPath = join(platformPkgRoot, "postinstall.cjs");
+
+      return {
+        packageJsonPath,
+        packageRoot: platformPkgRoot,
+        wrapperPath: join(dirname(packageJsonPath), "bin", "executor"),
+        installerPath,
+        runtimePath,
+      };
     } catch {
       // Fall back to the main executor package root and old bin/runtime path
     }
 
-    return createPackagePaths(runtimePackageJson);
+    return createPackagePaths(packageJsonPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new SidecarError(
@@ -274,6 +284,12 @@ const pushLogChunk = (tail: string[], chunk: string): void => {
 const runInstaller = async (
   paths: PackagePaths,
 ): Promise<{ stdoutTail: string[]; stderrTail: string[] }> => {
+  if (!existsSync(paths.installerPath)) {
+    // Platform-specific packages (executor >= 1.5.x) ship the native binary
+    // directly and have no postinstall installer. Skip gracefully.
+    return { stdoutTail: [], stderrTail: [] };
+  }
+
   const stdoutTail: string[] = [];
   const stderrTail: string[] = [];
 
