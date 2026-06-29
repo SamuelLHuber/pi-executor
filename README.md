@@ -27,9 +27,10 @@ This fork fixes all of the above.
 
 ## Install
 
-In Pi:
+In Pi, run:
 
-```\pi install git:github.com/SamuelLHuber/pi-executor
+```bash
+pi install git:github.com/SamuelLHuber/pi-executor
 ```
 
 Then `/reload` Pi to load the extension.
