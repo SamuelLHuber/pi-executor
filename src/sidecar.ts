@@ -6,7 +6,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { getScope, HttpError, type ScopeInfo } from "./http.ts";
+import { getHealth, HttpError } from "./http.ts";
 
 export const DEFAULT_PORT_SEED = 4788;
 export const PORT_SCAN_LIMIT = 32;
@@ -31,7 +31,6 @@ export type SidecarRecord = {
   pid?: number;
   ownedByPi: boolean;
   child?: ChildProcess;
-  scope?: ScopeInfo;
   stdoutTail: string[];
   stderrTail: string[];
 };
@@ -46,7 +45,6 @@ export type RegisteredSidecar = {
 
 export type PortProbe =
   | { port: number; kind: "free" }
-  | { port: number; kind: "reusable"; scope: ScopeInfo }
   | { port: number; kind: "occupied" };
 
 export class SidecarError extends Error {
@@ -56,7 +54,6 @@ export class SidecarError extends Error {
     | "BOOTSTRAP_FAILED"
     | "RUNTIME_MISSING"
     | "STARTUP_TIMEOUT"
-    | "SCOPE_MISMATCH"
     | "PORT_EXHAUSTED"
     | "LAUNCHER_FAILED";
   readonly details?: Record<string, string | number | boolean>;
@@ -89,6 +86,18 @@ const emptySidecarRegistry = (): SidecarRegistryFile => ({
   version: SIDECAR_REGISTRY_VERSION,
   sidecars: {},
 });
+
+export const getExecutorDataDir = (cwd: string): string => join(normalizeDir(cwd), ".executor");
+
+export const readAuthToken = async (dataDir: string): Promise<string | undefined> => {
+  try {
+    const raw = await readFile(join(dataDir, "server-control", "auth.json"), "utf8");
+    const parsed = JSON.parse(raw) as { token?: string };
+    return typeof parsed.token === "string" && parsed.token.length > 0 ? parsed.token : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 export const getSidecarRegistryPath = (): string =>
   join(process.env.HOME || homedir(), ".pi", "agent", "executor-sidecars.json");
@@ -235,8 +244,6 @@ export const resolveExecutorPackagePaths = (): PackagePaths => {
   try {
     const packageJsonPath = require.resolve("executor/package.json");
 
-    // In executor >= 1.5.x the native binary moved to platform-specific
-    // optionalDependencies packages (e.g. executor-darwin-arm64).
     try {
       const platformPkg = platformPackageName();
       const runtimePackageJson = require.resolve(`${platformPkg}/package.json`);
@@ -285,8 +292,6 @@ const runInstaller = async (
   paths: PackagePaths,
 ): Promise<{ stdoutTail: string[]; stderrTail: string[] }> => {
   if (!existsSync(paths.installerPath)) {
-    // Platform-specific packages (executor >= 1.5.x) ship the native binary
-    // directly and have no postinstall installer. Skip gracefully.
     return { stdoutTail: [], stderrTail: [] };
   }
 
@@ -449,41 +454,20 @@ const findPidByPort = async (port: number): Promise<number | undefined> => {
 
 const isHealthyRecord = async (record: SidecarRecord): Promise<boolean> => {
   try {
-    const scope = await getScope(record.baseUrl, HEALTH_TIMEOUT_MS);
-    if (scope.dir !== record.cwd) {
-      return false;
-    }
-    record.scope = scope;
-    return true;
+    return await getHealth(record.baseUrl, HEALTH_TIMEOUT_MS);
   } catch {
     return false;
   }
 };
 
-export const analyzePortProbe = (
-  cwd: string,
-  port: number,
-  scope?: ScopeInfo,
-  free = false,
-): PortProbe => {
-  if (scope && scope.dir === cwd) {
-    return { port, kind: "reusable", scope };
-  }
+export const analyzePortProbe = (port: number, free = false): PortProbe => {
   if (free) {
     return { port, kind: "free" };
   }
   return { port, kind: "occupied" };
 };
 
-export const selectPortCandidate = (
-  probes: PortProbe[],
-): { reusable?: PortProbe; freePort?: number } => {
-  for (const probe of probes) {
-    if (probe.kind === "reusable") {
-      return { reusable: probe };
-    }
-  }
-
+export const selectPortCandidate = (probes: PortProbe[]): { freePort?: number } => {
   const freeProbe = probes.find((probe) => probe.kind === "free");
   return freeProbe ? { freePort: freeProbe.port } : {};
 };
@@ -517,44 +501,29 @@ const hydrateRegisteredPid = async (record: SidecarRecord): Promise<SidecarRecor
   return record;
 };
 
-const probePort = async (cwd: string, port: number): Promise<PortProbe> => {
+const probePort = async (_cwd: string, port: number): Promise<PortProbe> => {
   const baseUrl = buildBaseUrl(port);
   try {
-    const scope = await getScope(baseUrl, HEALTH_TIMEOUT_MS);
-    return analyzePortProbe(cwd, port, scope, false);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      const free = await isPortFree(port);
-      return analyzePortProbe(cwd, port, undefined, free);
+    const alive = await getHealth(baseUrl, HEALTH_TIMEOUT_MS);
+    if (alive) {
+      return analyzePortProbe(port, false);
     }
-    const free = await isPortFree(port);
-    return analyzePortProbe(cwd, port, undefined, free);
+  } catch {
+    // not an executor we can talk to
   }
+
+  const free = await isPortFree(port);
+  return analyzePortProbe(port, free);
 };
 
-const scanPorts = async (cwd: string): Promise<{ reusable?: SidecarRecord; freePort?: number }> => {
+const scanPorts = async (cwd: string): Promise<{ freePort?: number }> => {
   const probes: PortProbe[] = [];
   for (let offset = 0; offset < PORT_SCAN_LIMIT; offset += 1) {
     const port = DEFAULT_PORT_SEED + offset;
     probes.push(await probePort(cwd, port));
   }
 
-  const selection = selectPortCandidate(probes);
-  if (selection.reusable?.kind === "reusable") {
-    return {
-      reusable: await hydrateRegisteredPid({
-        cwd,
-        port: selection.reusable.port,
-        baseUrl: buildBaseUrl(selection.reusable.port),
-        ownedByPi: false,
-        scope: selection.reusable.scope,
-        stdoutTail: [],
-        stderrTail: [],
-      }),
-    };
-  }
-
-  return { freePort: selection.freePort };
+  return selectPortCandidate(probes);
 };
 
 const attachExitCleanup = (record: SidecarRecord): void => {
@@ -578,9 +547,12 @@ const attachExitCleanup = (record: SidecarRecord): void => {
 
 const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarRecord> => {
   const runtimePath = await resolveRuntimeBinary();
+  const dataDir = getExecutorDataDir(cwd);
+  await mkdir(dataDir, { recursive: true });
+
   const child = spawn(runtimePath, ["web", "--port", String(port), "--foreground"], {
     cwd,
-    env: process.env,
+    env: { ...process.env, EXECUTOR_DATA_DIR: dataDir },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -616,10 +588,21 @@ export const findRunningSidecarForCwd = async (
     sidecarsByCwd.delete(cwd);
   }
 
-  const scanned = await scanPorts(cwd);
-  if (scanned.reusable) {
-    sidecarsByCwd.set(cwd, scanned.reusable);
-    return scanned.reusable;
+  const registered = await getRegisteredSidecar(cwd);
+  if (registered) {
+    const record = await hydrateRegisteredPid({
+      cwd,
+      port: registered.port,
+      baseUrl: registered.baseUrl,
+      ownedByPi: false,
+      stdoutTail: [],
+      stderrTail: [],
+    });
+    if (await isHealthyRecord(record)) {
+      sidecarsByCwd.set(cwd, record);
+      return record;
+    }
+    await unregisterSidecarForCwd(cwd, registered.pid);
   }
 
   return undefined;
@@ -644,44 +627,25 @@ export const ensureSidecar = async (cwdInput: string): Promise<SidecarRecord> =>
   sidecarsByCwd.set(cwd, record);
 
   try {
-    const scope = await getScope(record.baseUrl, STARTUP_TIMEOUT_MS).catch(async () => {
-      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
-      while (Date.now() < deadline) {
-        try {
-          return await getScope(record.baseUrl, HEALTH_TIMEOUT_MS);
-        } catch {
-          await delay(100);
-        }
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const alive = await getHealth(record.baseUrl, HEALTH_TIMEOUT_MS);
+      if (alive) {
+        await registerRuntimeSidecar(record);
+        return record;
       }
-      throw new HttpError({
-        baseUrl: record.baseUrl,
-        path: "/api/scope",
-        message: `Executor sidecar startup timed out after ${STARTUP_TIMEOUT_MS}ms`,
-      });
-    });
-
-    if (scope.dir !== cwd) {
-      throw new SidecarError("SCOPE_MISMATCH", `Executor sidecar scope mismatch for ${cwd}`, {
-        expectedDir: cwd,
-        actualDir: scope.dir,
-        port: record.port,
-      });
+      await delay(100);
     }
 
-    record.scope = scope;
-    await registerRuntimeSidecar(record);
-    return record;
+    throw new SidecarError(
+      "STARTUP_TIMEOUT",
+      `Executor sidecar startup timed out after ${STARTUP_TIMEOUT_MS}ms. stdout: ${joinTail(record.stdoutTail)} stderr: ${joinTail(record.stderrTail)}`,
+      { port: record.port },
+    );
   } catch (error) {
     await stopSidecar(record);
     if (error instanceof SidecarError) {
       throw error;
-    }
-    if (error instanceof HttpError) {
-      throw new SidecarError(
-        "STARTUP_TIMEOUT",
-        `${error.message}. stdout: ${joinTail(record.stdoutTail)} stderr: ${joinTail(record.stderrTail)}`,
-        { port: record.port },
-      );
     }
     const message = error instanceof Error ? error.message : String(error);
     throw new SidecarError("STARTUP_TIMEOUT", `Executor sidecar failed to start: ${message}`, {
@@ -742,16 +706,6 @@ export const stopSidecarForCwd = async (cwdInput: string): Promise<"stopped" | "
   }
 
   if (!isPidRunning(registered.pid)) {
-    await unregisterSidecarForCwd(cwd, registered.pid);
-    return "missing";
-  }
-
-  try {
-    const scope = await getScope(registered.baseUrl, HEALTH_TIMEOUT_MS);
-    if (scope.dir !== cwd) {
-      return "missing";
-    }
-  } catch {
     await unregisterSidecarForCwd(cwd, registered.pid);
     return "missing";
   }

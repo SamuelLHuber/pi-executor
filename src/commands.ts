@@ -81,7 +81,7 @@ const handleExecutorWeb = async (pi: ExtensionAPI, ctx: ExtensionCommandContext)
     await launchBrowser(endpoint.baseUrl);
     notifyResult(pi, "executor-web", `Executor UI: ${endpoint.baseUrl}`, {
       baseUrl: endpoint.baseUrl,
-      scopeId: endpoint.scope.id,
+      scopeId: `executor-${endpoint.mode}`,
       launched: true,
       mode: endpoint.mode,
     });
@@ -93,7 +93,7 @@ const handleExecutorWeb = async (pi: ExtensionAPI, ctx: ExtensionCommandContext)
       `Executor UI: ${endpoint.baseUrl}\n\nBrowser launch failed: ${message}`,
       {
         baseUrl: endpoint.baseUrl,
-        scopeId: endpoint.scope.id,
+        scopeId: `executor-${endpoint.mode}`,
         launched: false,
         mode: endpoint.mode,
       },
@@ -111,7 +111,7 @@ const handleExecutorStart = async (
 
   notifyResult(pi, "executor-start", `${label}: ${endpoint.baseUrl}`, {
     baseUrl: endpoint.baseUrl,
-    scopeId: endpoint.scope.id,
+    scopeId: `executor-${endpoint.mode}`,
     ownedByPi: endpoint.ownedByPi,
     mode: endpoint.mode,
   });

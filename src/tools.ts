@@ -200,7 +200,7 @@ const inspectConfiguredExecutor = async (
 
       if (settings.autoStart) {
         const endpoint = await resolveExecutorEndpoint(cwd);
-        return await inspectExecutorMcp(endpoint.baseUrl, hasUI);
+        return await inspectExecutorMcp(endpoint.baseUrl, hasUI, endpoint.token);
       }
 
       const sidecar = await findRunningSidecarForCwd(cwd);
@@ -280,6 +280,7 @@ const buildExecuteTool = (description: string) =>
         endpoint.baseUrl,
         {
           hasUI: ctx.hasUI,
+          token: endpoint.token,
           onElicitation: ctx.hasUI
             ? (interaction) =>
                 promptForInteraction(
@@ -301,7 +302,10 @@ const buildExecuteTool = (description: string) =>
         async (client) => client.execute(params.code),
       );
 
-      return toToolResult(outcome, { baseUrl: endpoint.baseUrl, scopeId: endpoint.scope.id });
+      return toToolResult(outcome, {
+        baseUrl: endpoint.baseUrl,
+        scopeId: endpoint.token ? `executor-${endpoint.mode}` : undefined,
+      });
     },
   });
 
@@ -323,7 +327,7 @@ const buildResumeTool = (description: string) =>
 
       const outcome = await withExecutorMcpClient(
         endpoint.baseUrl,
-        { hasUI: false },
+        { hasUI: false, token: endpoint.token },
         async (client) =>
           client.resume(
             params.executionId,
@@ -334,7 +338,7 @@ const buildResumeTool = (description: string) =>
 
       return toToolResult(outcome, {
         baseUrl: endpoint.baseUrl,
-        scopeId: endpoint.scope.id,
+        scopeId: endpoint.token ? `executor-${endpoint.mode}` : undefined,
       });
     },
   });
@@ -345,13 +349,13 @@ export const loadExecutorPrompt = async (cwd: string, hasUI: boolean): Promise<s
 };
 
 export const isExecutorToolDetails = (value: object | null): value is ExecuteToolDetails => {
-  if (!value || !("baseUrl" in value) || !("scopeId" in value) || !("isError" in value)) {
+  if (!value || !("baseUrl" in value) || !("isError" in value)) {
     return false;
   }
 
   return (
     typeof value.baseUrl === "string" &&
-    typeof value.scopeId === "string" &&
+    (value.scopeId === undefined || typeof value.scopeId === "string") &&
     typeof value.isError === "boolean"
   );
 };

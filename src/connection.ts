@@ -1,13 +1,12 @@
-import type { ScopeInfo } from "./http.ts";
-import { getScope } from "./http.ts";
+import { getHealth } from "./http.ts";
 import { resolveExecutorSettings } from "./settings.ts";
-import { ensureSidecar } from "./sidecar.ts";
+import { ensureSidecar, readAuthToken, getExecutorDataDir } from "./sidecar.ts";
 
 export type ExecutorEndpoint = {
   mode: "local" | "remote";
   baseUrl: string;
   ownedByPi: boolean;
-  scope: ScopeInfo;
+  token?: string;
 };
 
 const assertRemoteUrl = (remoteUrl: string): string => {
@@ -28,24 +27,20 @@ export const resolveExecutorEndpoint = async (cwd: string): Promise<ExecutorEndp
 
   if (settings.mode === "remote") {
     const baseUrl = assertRemoteUrl(settings.remoteUrl);
-    const scope = await getScope(baseUrl);
     return {
       mode: "remote",
       baseUrl,
       ownedByPi: false,
-      scope,
     };
   }
 
   const sidecar = await ensureSidecar(cwd);
-  if (!sidecar.scope) {
-    throw new Error(`Executor sidecar scope id missing for ${cwd}`);
-  }
+  const token = await readAuthToken(getExecutorDataDir(cwd));
 
   return {
     mode: "local",
     baseUrl: sidecar.baseUrl,
     ownedByPi: sidecar.ownedByPi,
-    scope: sidecar.scope,
+    token,
   };
 };

@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getScope } from "./http.ts";
+import { getHealth } from "./http.ts";
 import type { ExecutorSettings } from "./settings.ts";
 import { findRunningSidecarForCwd } from "./sidecar.ts";
 
@@ -78,7 +78,7 @@ export const refreshExecutorStatus = async (
     }
 
     try {
-      await getScope(settings.remoteUrl);
+      await getHealth(settings.remoteUrl);
       setExecutorState(cwd, { kind: "ready", mode: "remote", baseUrl: settings.remoteUrl });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

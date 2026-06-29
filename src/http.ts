@@ -14,6 +14,7 @@ export type FetchJsonOptions = {
   method?: "GET" | "POST";
   timeoutMs?: number;
   body?: JsonObject;
+  headers?: Record<string, string>;
 };
 
 export class HttpError extends Error {
@@ -83,10 +84,15 @@ export const fetchJson = async <T>(
     options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS,
   );
 
+  const headers: Record<string, string> = { ...options.headers };
+  if (options.body) {
+    headers["content-type"] = "application/json";
+  }
+
   try {
     const response = await fetch(url, {
       method: options.method ?? "GET",
-      headers: options.body ? { "content-type": "application/json" } : undefined,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
@@ -125,6 +131,20 @@ export const fetchJson = async <T>(
     });
   } finally {
     clearTimeout(timeout);
+  }
+};
+
+export const getHealth = async (baseUrl: string, timeoutMs?: number): Promise<boolean> => {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS);
+    const response = await fetch(new URL("/api/health", baseUrl), {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return response.status === 200;
+  } catch {
+    return false;
   }
 };
 

@@ -2,7 +2,7 @@ import type { JsonObject, JsonValue } from "./http.ts";
 
 export type ExecuteToolDetails = {
   baseUrl: string;
-  scopeId: string;
+  scopeId?: string;
   structuredContent: JsonValue;
   isError: boolean;
   executionId?: string;
@@ -50,7 +50,7 @@ export const parseJsonContent = (raw: string | undefined): JsonObject | undefine
 
 export const toToolResult = (
   outcome: ExecutorToolOutcome,
-  meta: { baseUrl: string; scopeId: string },
+  meta: { baseUrl: string; scopeId?: string },
 ): ExecuteToolResult => ({
   content: [{ type: "text", text: outcome.text }],
   details: {
