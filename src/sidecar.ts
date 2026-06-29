@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { constants as fsConstants, existsSync } from "node:fs";
+import { constants as fsConstants, createWriteStream, existsSync } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
@@ -545,10 +545,22 @@ const attachExitCleanup = (record: SidecarRecord): void => {
   child.once("close", clear);
 };
 
+export const getExecutorLogPath = (cwd: string): { stdout: string; stderr: string } => {
+  const dataDir = getExecutorDataDir(cwd);
+  return {
+    stdout: join(dataDir, "executor.stdout.log"),
+    stderr: join(dataDir, "executor.stderr.log"),
+  };
+};
+
 const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarRecord> => {
   const runtimePath = await resolveRuntimeBinary();
   const dataDir = getExecutorDataDir(cwd);
   await mkdir(dataDir, { recursive: true });
+
+  const logPaths = getExecutorLogPath(cwd);
+  const stdoutLog = createWriteStream(logPaths.stdout, { flags: "a" });
+  const stderrLog = createWriteStream(logPaths.stderr, { flags: "a" });
 
   const child = spawn(runtimePath, ["web", "--port", String(port), "--foreground"], {
     cwd,
@@ -569,8 +581,25 @@ const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarReco
 
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => pushLogChunk(record.stdoutTail, chunk));
-  child.stderr.on("data", (chunk: string) => pushLogChunk(record.stderrTail, chunk));
+
+  child.stdout.on("data", (chunk: string) => {
+    pushLogChunk(record.stdoutTail, chunk);
+    stdoutLog.write(chunk);
+  });
+  child.stderr.on("data", (chunk: string) => {
+    pushLogChunk(record.stderrTail, chunk);
+    stderrLog.write(chunk);
+  });
+
+  child.once("exit", () => {
+    stdoutLog.end();
+    stderrLog.end();
+  });
+  child.once("close", () => {
+    stdoutLog.end();
+    stderrLog.end();
+  });
+
   attachExitCleanup(record);
 
   return record;

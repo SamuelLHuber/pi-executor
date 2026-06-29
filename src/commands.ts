@@ -3,7 +3,13 @@ import type { JsonObject } from "./http.ts";
 import { resolveExecutorEndpoint } from "./connection.ts";
 import { resolveExecutorSettings, updateExecutorSettings, type SettingsScope } from "./settings.ts";
 import { refreshExecutorStatus, renderExecutorStatus, setExecutorState } from "./status.ts";
-import { SidecarError, stopSidecarForCwd } from "./sidecar.ts";
+import {
+  getExecutorDataDir,
+  getExecutorLogPath,
+  readAuthToken,
+  SidecarError,
+  stopSidecarForCwd,
+} from "./sidecar.ts";
 
 const assertNoArgs = (commandName: string, args: string): void => {
   if (args.trim().length > 0) {
@@ -77,9 +83,14 @@ const connectExecutor = async (ctx: ExtensionCommandContext) => {
 const handleExecutorWeb = async (pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> => {
   const { endpoint } = await connectExecutor(ctx);
 
+  let url = endpoint.baseUrl;
+  if (endpoint.mode === "local" && endpoint.token) {
+    url = `${endpoint.baseUrl}/?_token=${encodeURIComponent(endpoint.token)}`;
+  }
+
   try {
-    await launchBrowser(endpoint.baseUrl);
-    notifyResult(pi, "executor-web", `Executor UI: ${endpoint.baseUrl}`, {
+    await launchBrowser(url);
+    notifyResult(pi, "executor-web", `Executor UI: ${url}`, {
       baseUrl: endpoint.baseUrl,
       scopeId: `executor-${endpoint.mode}`,
       launched: true,
@@ -90,7 +101,7 @@ const handleExecutorWeb = async (pi: ExtensionAPI, ctx: ExtensionCommandContext)
     notifyResult(
       pi,
       "executor-web",
-      `Executor UI: ${endpoint.baseUrl}\n\nBrowser launch failed: ${message}`,
+      `Executor UI: ${url}\n\nBrowser launch failed: ${message}`,
       {
         baseUrl: endpoint.baseUrl,
         scopeId: `executor-${endpoint.mode}`,
@@ -114,6 +125,55 @@ const handleExecutorStart = async (
     scopeId: `executor-${endpoint.mode}`,
     ownedByPi: endpoint.ownedByPi,
     mode: endpoint.mode,
+  });
+};
+
+const handleExecutorLogs = async (
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+): Promise<void> => {
+  const settings = await resolveExecutorSettings(ctx.cwd);
+  if (settings.mode === "remote") {
+    notifyResult(pi, "executor-logs", "Remote mode: no local sidecar logs.", {
+      cwd: ctx.cwd,
+      mode: "remote",
+    });
+    return;
+  }
+
+  const logPaths = getExecutorLogPath(ctx.cwd);
+  const { readFileSync } = await import("node:fs");
+
+  let stdout = "";
+  let stderr = "";
+  try {
+    stdout = readFileSync(logPaths.stdout, "utf8");
+  } catch {
+    // no stdout log yet
+  }
+  try {
+    stderr = readFileSync(logPaths.stderr, "utf8");
+  } catch {
+    // no stderr log yet
+  }
+
+  const lines = 200;
+  const stdoutTail = stdout.split("\n").slice(-lines).join("\n");
+  const stderrTail = stderr.split("\n").slice(-lines).join("\n");
+
+  const message = [
+    `Executor logs (last ${lines} lines):`,
+    `stdout: ${logPaths.stdout}`,
+    stdoutTail || "(empty)",
+    `---`,
+    `stderr: ${logPaths.stderr}`,
+    stderrTail || "(empty)",
+  ].join("\n");
+
+  notifyResult(pi, "executor-logs", message, {
+    cwd: ctx.cwd,
+    stdoutPath: logPaths.stdout,
+    stderrPath: logPaths.stderr,
   });
 };
 
@@ -315,6 +375,14 @@ export const registerExecutorCommands = (pi: ExtensionAPI): void => {
     handler: async (args, ctx) => {
       assertNoArgs("executor-settings", args);
       await handleExecutorSettings(pi, ctx);
+    },
+  });
+
+  pi.registerCommand("executor-logs", {
+    description: "Show the last lines of the local Executor sidecar logs.",
+    handler: async (args, ctx) => {
+      assertNoArgs("executor-logs", args);
+      await handleExecutorLogs(pi, ctx);
     },
   });
 };
