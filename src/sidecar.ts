@@ -8,6 +8,20 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { getHealth } from "./http.ts";
 
+type ServerJson = {
+  version: number;
+  kind: string;
+  pid: number;
+  dataDir: string;
+  connection: {
+    origin: string;
+    apiBaseUrl: string;
+  };
+  auth?: {
+    token?: string;
+  };
+};
+
 export const DEFAULT_PORT_SEED = 4788;
 export const PORT_SCAN_LIMIT = 32;
 export const HEALTH_TIMEOUT_MS = 2_000;
@@ -88,16 +102,79 @@ const emptySidecarRegistry = (): SidecarRegistryFile => ({
 
 export const getExecutorDataDir = (cwd: string, dataDir?: string): string => {
   if (dataDir) {
-    return resolve(dataDir.replace(/^~($|\/)\//, homedir() + "$1"));
+    return resolve(dataDir.replace(/^~($|\/)/, homedir() + "$1"));
   }
   return join(normalizeDir(cwd), ".executor");
 };
 
 const computeRegistryKey = (cwd: string, dataDir?: string): string => {
   if (dataDir) {
-    return resolve(dataDir.replace(/^~($|\/)\//, homedir() + "$1"));
+    return resolve(dataDir.replace(/^~($|\/)/, homedir() + "$1"));
   }
   return normalizeDir(cwd);
+};
+
+const serverJsonPath = (dataDir: string): string => join(dataDir, "server-control", "server.json");
+
+const readServerJson = async (dataDir: string): Promise<ServerJson | undefined> => {
+  try {
+    const raw = await readFile(serverJsonPath(dataDir), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    const obj = parsed as Record<string, unknown>;
+
+    if (typeof obj.pid !== "number") return undefined;
+
+    const conn =
+      typeof obj.connection === "object" && obj.connection !== null
+        ? (obj.connection as Record<string, unknown>)
+        : {};
+    const origin = typeof conn.origin === "string" ? conn.origin : undefined;
+    const apiBaseUrl = typeof conn.apiBaseUrl === "string" ? conn.apiBaseUrl : undefined;
+    if (!origin || !apiBaseUrl) return undefined;
+
+    const auth =
+      typeof obj.auth === "object" && obj.auth !== null
+        ? (obj.auth as Record<string, unknown>)
+        : {};
+
+    return {
+      version: typeof obj.version === "number" ? obj.version : 1,
+      kind: (obj.kind as string) || "foreground",
+      pid: obj.pid,
+      dataDir: typeof obj.dataDir === "string" ? obj.dataDir : dataDir,
+      connection: { origin, apiBaseUrl },
+      auth: typeof auth.token === "string" ? { token: auth.token } : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const findSidecarFromServerJson = async (
+  cwd: string,
+  dataDir: string,
+): Promise<SidecarRecord | undefined> => {
+  const server = await readServerJson(dataDir);
+  if (!server) return undefined;
+  if (!isPidRunning(server.pid)) return undefined;
+
+  try {
+    if (!(await getHealth(server.connection.origin, HEALTH_TIMEOUT_MS))) return undefined;
+  } catch {
+    return undefined;
+  }
+
+  return {
+    cwd: server.dataDir,
+    registryKey: computeRegistryKey(cwd, dataDir),
+    port: Number(new URL(server.connection.origin).port),
+    baseUrl: server.connection.origin,
+    pid: server.pid,
+    ownedByPi: false,
+    stdoutTail: [],
+    stderrTail: [],
+  };
 };
 
 export const readAuthToken = async (dataDir: string): Promise<string | undefined> => {
@@ -574,6 +651,37 @@ const attachExitCleanup = (record: SidecarRecord): void => {
   child.once("close", clear);
 };
 
+const pollForStartup = async (
+  record: SidecarRecord,
+  dataDir: string,
+  expectedDir: string,
+): Promise<SidecarRecord> => {
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const discovered = await findSidecarFromServerJson(expectedDir, dataDir);
+    if (discovered) {
+      record.pid = discovered.pid;
+      record.port = discovered.port;
+      record.baseUrl = discovered.baseUrl;
+      await registerRuntimeSidecar(record);
+      return record;
+    }
+
+    if (await isHealthyRecord(record)) {
+      await registerRuntimeSidecar(record);
+      return record;
+    }
+
+    await delay(100);
+  }
+
+  throw new SidecarError(
+    "STARTUP_TIMEOUT",
+    `Executor sidecar startup timed out after ${STARTUP_TIMEOUT_MS}ms. stdout: ${joinTail(record.stdoutTail)} stderr: ${joinTail(record.stderrTail)}`,
+    { port: record.port },
+  );
+};
+
 export const getExecutorLogPath = (
   cwd: string,
   dataDir?: string,
@@ -648,12 +756,19 @@ export const findRunningSidecarForCwd = async (
 ): Promise<SidecarRecord | undefined> => {
   const cwd = normalizeDir(cwdInput);
   const registryKey = computeRegistryKey(cwd, dataDir);
+  const actualDataDir = getExecutorDataDir(cwd, dataDir);
   const cached = sidecarsByKey.get(registryKey);
   if (cached && (await isHealthyRecord(cached))) {
     return cached;
   }
   if (cached) {
     sidecarsByKey.delete(registryKey);
+  }
+
+  const discovered = await findSidecarFromServerJson(cwd, actualDataDir);
+  if (discovered) {
+    sidecarsByKey.set(registryKey, discovered);
+    return discovered;
   }
 
   const registered = await getRegisteredSidecar(cwd, registryKey);
@@ -686,33 +801,25 @@ export const ensureSidecar = async (cwdInput: string, dataDir?: string): Promise
     return reusable;
   }
 
-  const scanned = await scanPorts(cwd);
-  if (scanned.freePort === undefined) {
+  let port: number | undefined;
+  if (dataDir) {
+    port = DEFAULT_PORT_SEED;
+  } else {
+    port = (await scanPorts(cwd)).freePort;
+  }
+
+  if (port === undefined) {
     throw new SidecarError(
       "PORT_EXHAUSTED",
       `No free executor sidecar port found in ${DEFAULT_PORT_SEED}-${DEFAULT_PORT_SEED + PORT_SCAN_LIMIT - 1}`,
     );
   }
 
-  const record = await spawnOwnedSidecar(cwd, scanned.freePort, registryKey, actualDataDir);
+  const record = await spawnOwnedSidecar(cwd, port, registryKey, actualDataDir);
   sidecarsByKey.set(registryKey, record);
 
   try {
-    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const alive = await getHealth(record.baseUrl, HEALTH_TIMEOUT_MS);
-      if (alive) {
-        await registerRuntimeSidecar(record);
-        return record;
-      }
-      await delay(100);
-    }
-
-    throw new SidecarError(
-      "STARTUP_TIMEOUT",
-      `Executor sidecar startup timed out after ${STARTUP_TIMEOUT_MS}ms. stdout: ${joinTail(record.stdoutTail)} stderr: ${joinTail(record.stderrTail)}`,
-      { port: record.port },
-    );
+    return await pollForStartup(record, actualDataDir, cwd);
   } catch (error) {
     await stopSidecar(record);
     if (error instanceof SidecarError) {
