@@ -83,22 +83,16 @@ describe("sidecar helpers", () => {
     expect(await shouldBootstrapRuntime(runtimePath)).toBe(false);
   });
 
-  test("prefers reusable sidecars over free ports", () => {
-    const probes = [
-      analyzePortProbe("/repo", 4788, undefined, true),
-      analyzePortProbe("/repo", 4789, { id: "scope", name: "repo", dir: "/repo" }, false),
-    ];
-
-    expect(selectPortCandidate(probes)).toEqual({ reusable: probes[1] });
-  });
-
-  test("rejects scope mismatches during scan and falls back to free ports", () => {
-    const probes = [
-      analyzePortProbe("/repo", 4788, { id: "scope", name: "other", dir: "/other" }, false),
-      analyzePortProbe("/repo", 4789, undefined, true),
-    ];
+  test("selects a free port from probes", () => {
+    const probes = [analyzePortProbe(4788, false), analyzePortProbe(4789, true)];
 
     expect(selectPortCandidate(probes)).toEqual({ freePort: 4789 });
+  });
+
+  test("returns empty when no free port exists", () => {
+    const probes = [analyzePortProbe(4788, false), analyzePortProbe(4789, false)];
+
+    expect(selectPortCandidate(probes)).toEqual({});
   });
 
   test("collects only owned sidecars with child processes for cleanup", () => {
@@ -106,6 +100,7 @@ describe("sidecar helpers", () => {
     const records: SidecarRecord[] = [
       {
         cwd: "/repo-a",
+        registryKey: "/repo-a",
         port: 4788,
         baseUrl: "http://127.0.0.1:4788",
         ownedByPi: true,
@@ -115,6 +110,7 @@ describe("sidecar helpers", () => {
       },
       {
         cwd: "/repo-b",
+        registryKey: "/repo-b",
         port: 4789,
         baseUrl: "http://127.0.0.1:4789",
         ownedByPi: false,

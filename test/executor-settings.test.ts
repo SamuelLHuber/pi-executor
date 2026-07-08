@@ -52,6 +52,7 @@ describe("executor settings", () => {
       remoteUrl: "https://executor.example.com",
       showFooterStatus: true,
       stopLocalOnShutdown: true,
+      dataDir: "",
     });
   });
 

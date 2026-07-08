@@ -89,7 +89,7 @@ export const refreshExecutorStatus = async (
     return;
   }
 
-  const sidecar = await findRunningSidecarForCwd(cwd);
+  const sidecar = await findRunningSidecarForCwd(cwd, settings.dataDir || undefined);
   if (sidecar) {
     setExecutorState(cwd, { kind: "ready", mode: "local", baseUrl: sidecar.baseUrl });
   } else {

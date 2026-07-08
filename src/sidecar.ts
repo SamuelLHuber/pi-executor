@@ -44,9 +44,7 @@ export type RegisteredSidecar = {
   startedAt: string;
 };
 
-export type PortProbe =
-  | { port: number; kind: "free" }
-  | { port: number; kind: "occupied" };
+export type PortProbe = { port: number; kind: "free" } | { port: number; kind: "occupied" };
 
 export class SidecarError extends Error {
   readonly code:
@@ -253,7 +251,11 @@ const isMusl = (): boolean => {
 };
 
 const platformPackageName = (): string => {
-  const platformMap: Record<string, string> = { darwin: "darwin", linux: "linux", win32: "windows" };
+  const platformMap: Record<string, string> = {
+    darwin: "darwin",
+    linux: "linux",
+    win32: "windows",
+  };
   const archMap: Record<string, string> = { x64: "x64", arm64: "arm64" };
   const platform = platformMap[process.platform] || process.platform;
   const arch = archMap[process.arch] || process.arch;
@@ -572,7 +574,10 @@ const attachExitCleanup = (record: SidecarRecord): void => {
   child.once("close", clear);
 };
 
-export const getExecutorLogPath = (cwd: string, dataDir?: string): { stdout: string; stderr: string } => {
+export const getExecutorLogPath = (
+  cwd: string,
+  dataDir?: string,
+): { stdout: string; stderr: string } => {
   const resolvedDataDir = getExecutorDataDir(cwd, dataDir);
   return {
     stdout: join(resolvedDataDir, "executor.stdout.log"),

@@ -3,13 +3,7 @@ import type { JsonObject } from "./http.ts";
 import { resolveExecutorEndpoint } from "./connection.ts";
 import { resolveExecutorSettings, updateExecutorSettings, type SettingsScope } from "./settings.ts";
 import { refreshExecutorStatus, renderExecutorStatus, setExecutorState } from "./status.ts";
-import {
-  getExecutorDataDir,
-  getExecutorLogPath,
-  readAuthToken,
-  SidecarError,
-  stopSidecarForCwd,
-} from "./sidecar.ts";
+import { getExecutorLogPath, SidecarError, stopSidecarForCwd } from "./sidecar.ts";
 
 const assertNoArgs = (commandName: string, args: string): void => {
   if (args.trim().length > 0) {
@@ -98,17 +92,12 @@ const handleExecutorWeb = async (pi: ExtensionAPI, ctx: ExtensionCommandContext)
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    notifyResult(
-      pi,
-      "executor-web",
-      `Executor UI: ${url}\n\nBrowser launch failed: ${message}`,
-      {
-        baseUrl: endpoint.baseUrl,
-        scopeId: `executor-${endpoint.mode}`,
-        launched: false,
-        mode: endpoint.mode,
-      },
-    );
+    notifyResult(pi, "executor-web", `Executor UI: ${url}\n\nBrowser launch failed: ${message}`, {
+      baseUrl: endpoint.baseUrl,
+      scopeId: `executor-${endpoint.mode}`,
+      launched: false,
+      mode: endpoint.mode,
+    });
   }
 };
 
@@ -141,7 +130,7 @@ const handleExecutorLogs = async (
     return;
   }
 
-  const logPaths = getExecutorLogPath(ctx.cwd);
+  const logPaths = getExecutorLogPath(ctx.cwd, settings.dataDir || undefined);
   const { readFileSync } = await import("node:fs");
 
   let stdout = "";
@@ -196,7 +185,7 @@ const handleExecutorStop = async (
     return;
   }
 
-  const outcome = await stopSidecarForCwd(ctx.cwd);
+  const outcome = await stopSidecarForCwd(ctx.cwd, settings.dataDir || undefined);
 
   if (outcome === "stopped") {
     setExecutorState(ctx.cwd, { kind: "idle" });
@@ -240,6 +229,7 @@ const showSettingsSummary = (
       `remoteUrl: ${settings.remoteUrl || "(not set)"}`,
       `showFooterStatus: ${settings.showFooterStatus}`,
       `stopLocalOnShutdown: ${settings.stopLocalOnShutdown}`,
+      `dataDir: ${settings.dataDir || "(per-cwd)"}`,
       `cwd: ${cwd}`,
     ].join("\n"),
     {
@@ -249,6 +239,7 @@ const showSettingsSummary = (
       remoteUrl: settings.remoteUrl,
       showFooterStatus: settings.showFooterStatus,
       stopLocalOnShutdown: settings.stopLocalOnShutdown,
+      dataDir: settings.dataDir,
     },
   );
 };
@@ -270,6 +261,7 @@ const handleExecutorSettings = async (
         `set remoteUrl (${settings.remoteUrl || "not set"})`,
         `toggle footer status (${settings.showFooterStatus})`,
         `toggle stop on shutdown (${settings.stopLocalOnShutdown})`,
+        `set dataDir (${settings.dataDir || "per-cwd"})`,
         "done",
       ],
       { timeout: undefined },
@@ -338,6 +330,20 @@ const handleExecutorSettings = async (
       const next = await updateExecutorSettings(ctx.cwd, scope, {
         stopLocalOnShutdown: !settings.stopLocalOnShutdown,
       });
+      await refreshExecutorStatus(ctx, next, ctx.cwd);
+      showSettingsSummary(pi, ctx.cwd, next);
+      continue;
+    }
+
+    if (action.startsWith("set dataDir")) {
+      const dataDir = await ctx.ui.input(
+        "Executor data directory (empty = per-cwd)",
+        settings.dataDir,
+      );
+      if (dataDir === undefined) {
+        continue;
+      }
+      const next = await updateExecutorSettings(ctx.cwd, scope, { dataDir });
       await refreshExecutorStatus(ctx, next, ctx.cwd);
       showSettingsSummary(pi, ctx.cwd, next);
     }

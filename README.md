@@ -87,13 +87,13 @@ discovery and calling pattern.
 
 ## Commands
 
-| Command              | What it does                                                          |
-| -------------------- | --------------------------------------------------------------------- |
-| `/executor-web`      | Open the Web UI with auto-authentication (`?_token=...`)              |
-| `/executor-start`    | Start the sidecar and print its URL                                   |
-| `/executor-stop`     | Stop the local sidecar for the current cwd                            |
-| `/executor-settings` | Configure local vs remote, autoStart, footer status, etc.             |
-| `/executor-logs`     | Show the last 200 lines of sidecar stdout / stderr logs               |
+| Command              | What it does                                              |
+| -------------------- | --------------------------------------------------------- |
+| `/executor-web`      | Open the Web UI with auto-authentication (`?_token=...`)  |
+| `/executor-start`    | Start the sidecar and print its URL                       |
+| `/executor-stop`     | Stop the local sidecar for the current cwd                |
+| `/executor-settings` | Configure local vs remote, autoStart, footer status, etc. |
+| `/executor-logs`     | Show the last 200 lines of sidecar stdout / stderr logs   |
 
 ## Settings
 
@@ -106,7 +106,8 @@ Configure the extension in `~/.pi/agent/settings.json` or `.pi/settings.json`:
     "autoStart": true,
     "remoteUrl": "",
     "showFooterStatus": true,
-    "stopLocalOnShutdown": true
+    "stopLocalOnShutdown": true,
+    "dataDir": ""
   }
 }
 ```
@@ -116,8 +117,28 @@ Configure the extension in `~/.pi/agent/settings.json` or `.pi/settings.json`:
 - `remoteUrl`: required for remote mode (e.g. `http://127.0.0.1:4788`)
 - `showFooterStatus`: show the green dot in Pi's footer
 - `stopLocalOnShutdown`: stop Pi-owned sidecars when the session ends
+- `dataDir`: custom data directory for the executor sidecar. When empty, each project gets its own `<cwd>/.executor`. Set to e.g. `"~/.executor"` to share one global executor across all projects
 
 You can also manage these interactively with `/executor-settings`.
+
+## Global executor
+
+By default every project gets its own sidecar and its own data directory (`<cwd>/.executor`). To run a single shared executor for all projects, set a global `dataDir` in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "piExecutor": {
+    "dataDir": "~/.executor"
+  }
+}
+```
+
+With this setting:
+
+- All Pi sessions connect to the same executor instance regardless of cwd
+- Integrations, connections, and auth tokens live in one place (`~/.executor`)
+- The first session that needs executor starts the sidecar; subsequent sessions reuse it
+- Only the session that originally started the sidecar will auto-stop it on shutdown (unless another session explicitly runs `/executor-stop`)
 
 ## How to add integrations
 
@@ -254,6 +275,7 @@ bare URL manually, get the token from `.executor/server-control/auth.json`.
 ### "A local Executor foreground is already running"
 
 Another executor process owns `~/.executor`. Either:
+
 - Kill it (`pkill -f "executor web"`) and let Pi manage its own, or
 - Switch to remote mode pointing at the existing instance
 
