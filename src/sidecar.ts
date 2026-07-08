@@ -6,7 +6,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { getHealth, HttpError } from "./http.ts";
+import { getHealth } from "./http.ts";
 
 export const DEFAULT_PORT_SEED = 4788;
 export const PORT_SCAN_LIMIT = 32;
@@ -26,6 +26,7 @@ export type PackagePaths = {
 
 export type SidecarRecord = {
   cwd: string;
+  registryKey: string;
   port: number;
   baseUrl: string;
   pid?: number;
@@ -76,7 +77,7 @@ type SidecarRegistryFile = {
 };
 
 const require = createRequire(import.meta.url);
-const sidecarsByCwd = new Map<string, SidecarRecord>();
+const sidecarsByKey = new Map<string, SidecarRecord>();
 
 const normalizeDir = (cwd: string): string => resolve(cwd);
 
@@ -87,7 +88,19 @@ const emptySidecarRegistry = (): SidecarRegistryFile => ({
   sidecars: {},
 });
 
-export const getExecutorDataDir = (cwd: string): string => join(normalizeDir(cwd), ".executor");
+export const getExecutorDataDir = (cwd: string, dataDir?: string): string => {
+  if (dataDir) {
+    return resolve(dataDir.replace(/^~($|\/)\//, homedir() + "$1"));
+  }
+  return join(normalizeDir(cwd), ".executor");
+};
+
+const computeRegistryKey = (cwd: string, dataDir?: string): string => {
+  if (dataDir) {
+    return resolve(dataDir.replace(/^~($|\/)\//, homedir() + "$1"));
+  }
+  return normalizeDir(cwd);
+};
 
 export const readAuthToken = async (dataDir: string): Promise<string | undefined> => {
   try {
@@ -141,33 +154,41 @@ const writeSidecarRegistry = async (registry: SidecarRegistryFile): Promise<void
 
 export const getRegisteredSidecar = async (
   cwdInput: string,
+  registryKey?: string,
 ): Promise<RegisteredSidecar | undefined> => {
-  const cwd = normalizeDir(cwdInput);
+  const key = registryKey ?? normalizeDir(cwdInput);
   const registry = await readSidecarRegistry();
-  return registry.sidecars[cwd];
+  return registry.sidecars[key];
 };
 
-export const registerSidecarForCwd = async (record: RegisteredSidecar): Promise<void> => {
-  const cwd = normalizeDir(record.cwd);
+export const registerSidecarForCwd = async (
+  record: RegisteredSidecar,
+  registryKey?: string,
+): Promise<void> => {
+  const key = registryKey ?? normalizeDir(record.cwd);
   const registry = await readSidecarRegistry();
-  registry.sidecars[cwd] = {
+  registry.sidecars[key] = {
     ...record,
-    cwd,
+    cwd: record.cwd,
   };
   await writeSidecarRegistry(registry);
 };
 
-export const unregisterSidecarForCwd = async (cwdInput: string, pid?: number): Promise<void> => {
-  const cwd = normalizeDir(cwdInput);
+export const unregisterSidecarForCwd = async (
+  cwdInput: string,
+  pid?: number,
+  registryKey?: string,
+): Promise<void> => {
+  const key = registryKey ?? normalizeDir(cwdInput);
   const registry = await readSidecarRegistry();
-  const registered = registry.sidecars[cwd];
+  const registered = registry.sidecars[key];
   if (!registered) {
     return;
   }
   if (pid !== undefined && registered.pid !== pid) {
     return;
   }
-  delete registry.sidecars[cwd];
+  delete registry.sidecars[key];
   await writeSidecarRegistry(registry);
 };
 
@@ -176,13 +197,16 @@ const registerRuntimeSidecar = async (record: SidecarRecord): Promise<void> => {
     return;
   }
 
-  await registerSidecarForCwd({
-    cwd: record.cwd,
-    pid: record.pid,
-    port: record.port,
-    baseUrl: record.baseUrl,
-    startedAt: new Date().toISOString(),
-  });
+  await registerSidecarForCwd(
+    {
+      cwd: record.cwd,
+      pid: record.pid,
+      port: record.port,
+      baseUrl: record.baseUrl,
+      startedAt: new Date().toISOString(),
+    },
+    record.registryKey,
+  );
 };
 
 export const isSupportedRuntimePlatform = (platform: NodeJS.Platform, arch: string): boolean => {
@@ -476,10 +500,10 @@ export const collectOwnedSidecars = (records: Iterable<SidecarRecord>): SidecarR
   Array.from(records).filter((record) => record.ownedByPi && record.child !== undefined);
 
 const hydrateRegisteredPid = async (record: SidecarRecord): Promise<SidecarRecord> => {
-  const registered = await getRegisteredSidecar(record.cwd);
+  const registered = await getRegisteredSidecar(record.cwd, record.registryKey);
   if (registered && registered.port === record.port && registered.baseUrl === record.baseUrl) {
     if (!isPidRunning(registered.pid)) {
-      await unregisterSidecarForCwd(record.cwd, registered.pid);
+      await unregisterSidecarForCwd(record.cwd, registered.pid, record.registryKey);
     } else {
       record.pid = registered.pid;
       return record;
@@ -489,13 +513,16 @@ const hydrateRegisteredPid = async (record: SidecarRecord): Promise<SidecarRecor
   const pid = await findPidByPort(record.port);
   if (pid !== undefined) {
     record.pid = pid;
-    await registerSidecarForCwd({
-      cwd: record.cwd,
-      pid,
-      port: record.port,
-      baseUrl: record.baseUrl,
-      startedAt: new Date().toISOString(),
-    });
+    await registerSidecarForCwd(
+      {
+        cwd: record.cwd,
+        pid,
+        port: record.port,
+        baseUrl: record.baseUrl,
+        startedAt: new Date().toISOString(),
+      },
+      record.registryKey,
+    );
   }
 
   return record;
@@ -533,32 +560,36 @@ const attachExitCleanup = (record: SidecarRecord): void => {
   }
 
   const clear = (): void => {
-    const current = sidecarsByCwd.get(record.cwd);
+    const current = sidecarsByKey.get(record.registryKey);
     if (current === record) {
-      sidecarsByCwd.delete(record.cwd);
+      sidecarsByKey.delete(record.registryKey);
     }
 
-    void unregisterSidecarForCwd(record.cwd, record.pid);
+    void unregisterSidecarForCwd(record.cwd, record.pid, record.registryKey);
   };
 
   child.once("exit", clear);
   child.once("close", clear);
 };
 
-export const getExecutorLogPath = (cwd: string): { stdout: string; stderr: string } => {
-  const dataDir = getExecutorDataDir(cwd);
+export const getExecutorLogPath = (cwd: string, dataDir?: string): { stdout: string; stderr: string } => {
+  const resolvedDataDir = getExecutorDataDir(cwd, dataDir);
   return {
-    stdout: join(dataDir, "executor.stdout.log"),
-    stderr: join(dataDir, "executor.stderr.log"),
+    stdout: join(resolvedDataDir, "executor.stdout.log"),
+    stderr: join(resolvedDataDir, "executor.stderr.log"),
   };
 };
 
-const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarRecord> => {
+const spawnOwnedSidecar = async (
+  cwd: string,
+  port: number,
+  registryKey: string,
+  dataDir: string,
+): Promise<SidecarRecord> => {
   const runtimePath = await resolveRuntimeBinary();
-  const dataDir = getExecutorDataDir(cwd);
   await mkdir(dataDir, { recursive: true });
 
-  const logPaths = getExecutorLogPath(cwd);
+  const logPaths = getExecutorLogPath(cwd, dataDir);
   const stdoutLog = createWriteStream(logPaths.stdout, { flags: "a" });
   const stderrLog = createWriteStream(logPaths.stderr, { flags: "a" });
 
@@ -570,6 +601,7 @@ const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarReco
 
   const record: SidecarRecord = {
     cwd,
+    registryKey,
     port,
     baseUrl: buildBaseUrl(port),
     pid: child.pid,
@@ -607,20 +639,23 @@ const spawnOwnedSidecar = async (cwd: string, port: number): Promise<SidecarReco
 
 export const findRunningSidecarForCwd = async (
   cwdInput: string,
+  dataDir?: string,
 ): Promise<SidecarRecord | undefined> => {
   const cwd = normalizeDir(cwdInput);
-  const cached = sidecarsByCwd.get(cwd);
+  const registryKey = computeRegistryKey(cwd, dataDir);
+  const cached = sidecarsByKey.get(registryKey);
   if (cached && (await isHealthyRecord(cached))) {
     return cached;
   }
   if (cached) {
-    sidecarsByCwd.delete(cwd);
+    sidecarsByKey.delete(registryKey);
   }
 
-  const registered = await getRegisteredSidecar(cwd);
+  const registered = await getRegisteredSidecar(cwd, registryKey);
   if (registered) {
     const record = await hydrateRegisteredPid({
       cwd,
+      registryKey,
       port: registered.port,
       baseUrl: registered.baseUrl,
       ownedByPi: false,
@@ -628,18 +663,20 @@ export const findRunningSidecarForCwd = async (
       stderrTail: [],
     });
     if (await isHealthyRecord(record)) {
-      sidecarsByCwd.set(cwd, record);
+      sidecarsByKey.set(registryKey, record);
       return record;
     }
-    await unregisterSidecarForCwd(cwd, registered.pid);
+    await unregisterSidecarForCwd(cwd, registered.pid, registryKey);
   }
 
   return undefined;
 };
 
-export const ensureSidecar = async (cwdInput: string): Promise<SidecarRecord> => {
+export const ensureSidecar = async (cwdInput: string, dataDir?: string): Promise<SidecarRecord> => {
   const cwd = normalizeDir(cwdInput);
-  const reusable = await findRunningSidecarForCwd(cwd);
+  const registryKey = computeRegistryKey(cwd, dataDir);
+  const actualDataDir = getExecutorDataDir(cwd, dataDir);
+  const reusable = await findRunningSidecarForCwd(cwd, dataDir);
   if (reusable) {
     return reusable;
   }
@@ -652,8 +689,8 @@ export const ensureSidecar = async (cwdInput: string): Promise<SidecarRecord> =>
     );
   }
 
-  const record = await spawnOwnedSidecar(cwd, scanned.freePort);
-  sidecarsByCwd.set(cwd, record);
+  const record = await spawnOwnedSidecar(cwd, scanned.freePort, registryKey, actualDataDir);
+  sidecarsByKey.set(registryKey, record);
 
   try {
     const deadline = Date.now() + STARTUP_TIMEOUT_MS;
@@ -684,13 +721,13 @@ export const ensureSidecar = async (cwdInput: string): Promise<SidecarRecord> =>
 };
 
 export const stopSidecar = async (record: SidecarRecord): Promise<void> => {
-  const current = sidecarsByCwd.get(record.cwd);
+  const current = sidecarsByKey.get(record.registryKey);
   if (current === record) {
-    sidecarsByCwd.delete(record.cwd);
+    sidecarsByKey.delete(record.registryKey);
   }
 
   if (record.pid) {
-    await unregisterSidecarForCwd(record.cwd, record.pid);
+    await unregisterSidecarForCwd(record.cwd, record.pid, record.registryKey);
   }
 
   const child = record.child;
@@ -715,39 +752,43 @@ export const stopSidecar = async (record: SidecarRecord): Promise<void> => {
   });
 };
 
-export const getSidecarRecord = (cwdInput: string): SidecarRecord | undefined =>
-  sidecarsByCwd.get(normalizeDir(cwdInput));
+export const getSidecarRecord = (cwdInput: string, dataDir?: string): SidecarRecord | undefined =>
+  sidecarsByKey.get(computeRegistryKey(normalizeDir(cwdInput), dataDir));
 
-export const stopSidecarForCwd = async (cwdInput: string): Promise<"stopped" | "missing"> => {
+export const stopSidecarForCwd = async (
+  cwdInput: string,
+  dataDir?: string,
+): Promise<"stopped" | "missing"> => {
   const cwd = normalizeDir(cwdInput);
-  const running = await findRunningSidecarForCwd(cwd);
+  const registryKey = computeRegistryKey(cwd, dataDir);
+  const running = await findRunningSidecarForCwd(cwd, dataDir);
   if (running && (running.ownedByPi || running.pid !== undefined)) {
     await stopSidecar(running);
     return "stopped";
   }
   if (running) {
-    sidecarsByCwd.delete(cwd);
+    sidecarsByKey.delete(registryKey);
   }
 
-  const registered = await getRegisteredSidecar(cwd);
+  const registered = await getRegisteredSidecar(cwd, registryKey);
   if (!registered) {
     return "missing";
   }
 
   if (!isPidRunning(registered.pid)) {
-    await unregisterSidecarForCwd(cwd, registered.pid);
+    await unregisterSidecarForCwd(cwd, registered.pid, registryKey);
     return "missing";
   }
 
-  sidecarsByCwd.delete(cwd);
-  await unregisterSidecarForCwd(cwd, registered.pid);
+  sidecarsByKey.delete(registryKey);
+  await unregisterSidecarForCwd(cwd, registered.pid, registryKey);
   await terminatePid(registered.pid);
   return "stopped";
 };
 
 export const shutdownOwnedSidecars = async (): Promise<void> => {
-  const owned = collectOwnedSidecars(sidecarsByCwd.values());
+  const owned = collectOwnedSidecars(sidecarsByKey.values());
   await Promise.all(owned.map((record) => stopSidecar(record)));
 };
 
-export const getSidecarRecords = (): SidecarRecord[] => Array.from(sidecarsByCwd.values());
+export const getSidecarRecords = (): SidecarRecord[] => Array.from(sidecarsByKey.values());

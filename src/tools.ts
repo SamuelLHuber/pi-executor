@@ -203,7 +203,7 @@ const inspectConfiguredExecutor = async (
         return await inspectExecutorMcp(endpoint.baseUrl, hasUI, endpoint.token);
       }
 
-      const sidecar = await findRunningSidecarForCwd(cwd);
+      const sidecar = await findRunningSidecarForCwd(cwd, settings.dataDir || undefined);
       if (!sidecar) {
         return undefined;
       }
@@ -353,10 +353,11 @@ export const isExecutorToolDetails = (value: object | null): value is ExecuteToo
     return false;
   }
 
+  const maybe = value as Record<string, unknown>;
   return (
-    typeof value.baseUrl === "string" &&
-    (value.scopeId === undefined || typeof value.scopeId === "string") &&
-    typeof value.isError === "boolean"
+    typeof maybe.baseUrl === "string" &&
+    (maybe.scopeId === undefined || typeof maybe.scopeId === "string") &&
+    typeof maybe.isError === "boolean"
   );
 };
 

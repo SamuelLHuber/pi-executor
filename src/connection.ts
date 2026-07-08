@@ -1,4 +1,3 @@
-import { getHealth } from "./http.ts";
 import { resolveExecutorSettings } from "./settings.ts";
 import { ensureSidecar, readAuthToken, getExecutorDataDir } from "./sidecar.ts";
 
@@ -34,8 +33,8 @@ export const resolveExecutorEndpoint = async (cwd: string): Promise<ExecutorEndp
     };
   }
 
-  const sidecar = await ensureSidecar(cwd);
-  const token = await readAuthToken(getExecutorDataDir(cwd));
+  const sidecar = await ensureSidecar(cwd, settings.dataDir || undefined);
+  const token = await readAuthToken(getExecutorDataDir(cwd, settings.dataDir || undefined));
 
   return {
     mode: "local",
