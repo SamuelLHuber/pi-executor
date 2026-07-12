@@ -29,8 +29,13 @@ describe("executor settings", () => {
     process.env.HOME = home;
 
     expect(await resolveExecutorSettings(cwd)).toEqual({
-      ...getDefaultExecutorSettings(),
+      mode: "local",
+      autoStart: true,
+      remoteUrl: "",
+      showFooterStatus: true,
+      stopLocalOnShutdown: true,
       dataDir: "~/.executor",
+      scopeDir: "",
     });
   });
 
@@ -56,6 +61,7 @@ describe("executor settings", () => {
       showFooterStatus: true,
       stopLocalOnShutdown: true,
       dataDir: "",
+      scopeDir: "",
     });
   });
 

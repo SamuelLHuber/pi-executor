@@ -252,6 +252,7 @@ const showSettingsSummary = (
       showFooterStatus: settings.showFooterStatus,
       stopLocalOnShutdown: settings.stopLocalOnShutdown,
       dataDir: settings.dataDir,
+      scopeDir: settings.scopeDir,
     },
   );
 };
@@ -274,6 +275,7 @@ const handleExecutorSettings = async (
         `toggle footer status (${settings.showFooterStatus})`,
         `toggle stop on shutdown (${settings.stopLocalOnShutdown})`,
         `set dataDir (${settings.dataDir || "per-cwd"})`,
+        `set scopeDir (${settings.scopeDir || "dataDir"})`,
         "done",
       ],
       { timeout: undefined },
@@ -356,6 +358,20 @@ const handleExecutorSettings = async (
         continue;
       }
       const next = await updateExecutorSettings(ctx.cwd, scope, { dataDir });
+      await refreshExecutorStatus(ctx, next, ctx.cwd);
+      showSettingsSummary(pi, ctx.cwd, next);
+      continue;
+    }
+
+    if (action.startsWith("set scopeDir")) {
+      const scopeDir = await ctx.ui.input(
+        "Executor scope directory (empty = dataDir)",
+        settings.scopeDir,
+      );
+      if (scopeDir === undefined) {
+        continue;
+      }
+      const next = await updateExecutorSettings(ctx.cwd, scope, { scopeDir });
       await refreshExecutorStatus(ctx, next, ctx.cwd);
       showSettingsSummary(pi, ctx.cwd, next);
     }

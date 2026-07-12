@@ -12,6 +12,7 @@ export type ExecutorSettings = {
   showFooterStatus: boolean;
   stopLocalOnShutdown: boolean;
   dataDir: string;
+  scopeDir: string;
 };
 
 type RootSettings = {
@@ -26,6 +27,7 @@ const DEFAULT_SETTINGS: ExecutorSettings = {
   showFooterStatus: true,
   stopLocalOnShutdown: true,
   dataDir: "",
+  scopeDir: "",
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -59,6 +61,9 @@ const sanitizeSettings = (
   }
   if (typeof value.dataDir === "string") {
     sanitized.dataDir = value.dataDir.trim();
+  }
+  if (typeof value.scopeDir === "string") {
+    sanitized.scopeDir = value.scopeDir.trim();
   }
 
   return sanitized;
@@ -162,4 +167,5 @@ export const formatExecutorSettings = (settings: ExecutorSettings): string[] => 
   `showFooterStatus: ${settings.showFooterStatus}`,
   `stopLocalOnShutdown: ${settings.stopLocalOnShutdown}`,
   `dataDir: ${settings.dataDir || "(per-cwd)"}`,
+  `scopeDir: ${settings.scopeDir || "(dataDir)"}`,
 ];

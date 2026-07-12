@@ -38,7 +38,7 @@ export const resolveExecutorEndpoint = async (cwd: string): Promise<ExecutorEndp
   const hasProjectOverride = await hasProjectExecutorSettings(cwd);
   if (!hasProjectOverride) {
     const dataDir = getExecutorDataDir(cwd, settings.dataDir || undefined);
-    const global = await ensureGlobalExecutor(dataDir);
+    const global = await ensureGlobalExecutor(dataDir, settings.scopeDir || undefined);
     const token = await readAuthToken(dataDir);
     return {
       mode: "local",

@@ -118,6 +118,7 @@ Configure the extension in `~/.pi/agent/settings.json` (global) or `.pi/settings
 - `showFooterStatus`: show the green dot in Pi's footer
 - `stopLocalOnShutdown`: stop Pi-owned sidecars when the session ends
 - `dataDir`: custom data directory for the executor sidecar
+- `scopeDir`: workspace scope directory that determines the executor tenant. Defaults to `dataDir`. If you have legacy data created under a different directory (e.g. a specific project), set this to that path so the global executor can see it
 
 You can also manage these interactively with `/executor-settings`.
 
@@ -144,6 +145,8 @@ Pi never starts or stops this server. You run it yourself (e.g. `npx executor we
 ### 2. Global-local mode (default)
 
 When **no project settings** exist (no `.pi/settings.json` with a `piExecutor` key), Pi uses a **single shared executor** at `~/.executor` on port `4788`.
+
+- `scopeDir` controls which workspace tenant the global executor uses. If your existing integrations were created while running executor inside a specific project, set `scopeDir` to that project's path so the global executor loads them
 
 - The first Pi session that needs executor **checks if it's running**, and if not, **starts it detached**
 - The executor survives Pi restarts because it is **not owned by any Pi session**

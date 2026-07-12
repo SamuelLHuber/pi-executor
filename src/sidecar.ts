@@ -750,8 +750,14 @@ const spawnOwnedSidecar = async (
   return record;
 };
 
-const ensureGlobalExecutor = async (dataDir: string): Promise<{ baseUrl: string }> => {
+const ensureGlobalExecutor = async (
+  dataDir: string,
+  scopeDir?: string,
+): Promise<{ baseUrl: string }> => {
   const resolvedDataDir = resolve(dataDir.replace(/^~($|\/)/, homedir() + "$1"));
+  const resolvedScopeDir = scopeDir
+    ? resolve(scopeDir.replace(/^~($|\/)/, homedir() + "$1"))
+    : resolvedDataDir;
 
   const server = await readServerJson(resolvedDataDir);
   if (server && isPidRunning(server.pid)) {
@@ -769,7 +775,16 @@ const ensureGlobalExecutor = async (dataDir: string): Promise<{ baseUrl: string 
   const stdoutLog = createWriteStream(stdoutPath, { flags: "a" });
   const stderrLog = createWriteStream(stderrPath, { flags: "a" });
 
-  const child = spawn(runtimePath, ["web", "--port", String(DEFAULT_PORT_SEED), "--foreground"], {
+  const args = [
+    "web",
+    "--port",
+    String(DEFAULT_PORT_SEED),
+    "--foreground",
+    "--scope",
+    resolvedScopeDir,
+  ];
+
+  const child = spawn(runtimePath, args, {
     cwd: resolvedDataDir,
     env: { ...process.env, EXECUTOR_DATA_DIR: resolvedDataDir },
     stdio: ["ignore", "pipe", "pipe"],
