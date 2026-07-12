@@ -1,5 +1,5 @@
-import { resolveExecutorSettings } from "./settings.ts";
-import { ensureSidecar, readAuthToken, getExecutorDataDir } from "./sidecar.ts";
+import { resolveExecutorSettings, hasProjectExecutorSettings } from "./settings.ts";
+import { ensureSidecar, ensureGlobalExecutor, readAuthToken, getExecutorDataDir } from "./sidecar.ts";
 
 export type ExecutorEndpoint = {
   mode: "local" | "remote";
@@ -26,10 +26,25 @@ export const resolveExecutorEndpoint = async (cwd: string): Promise<ExecutorEndp
 
   if (settings.mode === "remote") {
     const baseUrl = assertRemoteUrl(settings.remoteUrl);
+    const token = await readAuthToken(getExecutorDataDir(cwd, settings.dataDir || undefined));
     return {
       mode: "remote",
       baseUrl,
       ownedByPi: false,
+      token,
+    };
+  }
+
+  const hasProjectOverride = await hasProjectExecutorSettings(cwd);
+  if (!hasProjectOverride) {
+    const dataDir = getExecutorDataDir(cwd, settings.dataDir || undefined);
+    const global = await ensureGlobalExecutor(dataDir);
+    const token = await readAuthToken(dataDir);
+    return {
+      mode: "local",
+      baseUrl: global.baseUrl,
+      ownedByPi: false,
+      token,
     };
   }
 

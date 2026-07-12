@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { JsonObject } from "./http.ts";
 import { resolveExecutorEndpoint } from "./connection.ts";
-import { resolveExecutorSettings, updateExecutorSettings, type SettingsScope } from "./settings.ts";
+import { resolveExecutorSettings, hasProjectExecutorSettings, updateExecutorSettings, type SettingsScope } from "./settings.ts";
 import { refreshExecutorStatus, renderExecutorStatus, setExecutorState } from "./status.ts";
 import { getExecutorLogPath, SidecarError, stopSidecarForCwd } from "./sidecar.ts";
 
@@ -181,6 +181,18 @@ const handleExecutorStop = async (
         stopped: false,
         reason: "remote",
       },
+    );
+    return;
+  }
+
+  const isGlobal = !(await hasProjectExecutorSettings(ctx.cwd));
+  if (isGlobal) {
+    await refreshExecutorStatus(ctx, settings, ctx.cwd);
+    notifyResult(
+      pi,
+      "executor-stop",
+      "Global Executor is shared across projects. Pi does not stop shared servers.",
+      { cwd: ctx.cwd, stopped: false, reason: "global" },
     );
     return;
   }

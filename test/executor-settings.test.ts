@@ -28,7 +28,10 @@ describe("executor settings", () => {
     const home = await createWorkspace();
     process.env.HOME = home;
 
-    expect(await resolveExecutorSettings(cwd)).toEqual(getDefaultExecutorSettings());
+    expect(await resolveExecutorSettings(cwd)).toEqual({
+      ...getDefaultExecutorSettings(),
+      dataDir: "~/.executor",
+    });
   });
 
   test("merges global and project settings", async () => {

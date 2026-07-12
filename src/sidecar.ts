@@ -750,6 +750,83 @@ const spawnOwnedSidecar = async (
   return record;
 };
 
+const ensureGlobalExecutor = async (dataDir: string): Promise<{ baseUrl: string }> => {
+  const resolvedDataDir = resolve(dataDir.replace(/^~($|\/)/, homedir() + "$1"));
+
+  const server = await readServerJson(resolvedDataDir);
+  if (server && isPidRunning(server.pid)) {
+    const healthy = await getHealth(server.connection.origin, HEALTH_TIMEOUT_MS).catch(() => false);
+    if (healthy) {
+      return { baseUrl: server.connection.origin };
+    }
+  }
+
+  const runtimePath = await resolveRuntimeBinary();
+  await mkdir(resolvedDataDir, { recursive: true });
+
+  const stdoutPath = join(resolvedDataDir, "executor.stdout.log");
+  const stderrPath = join(resolvedDataDir, "executor.stderr.log");
+  const stdoutLog = createWriteStream(stdoutPath, { flags: "a" });
+  const stderrLog = createWriteStream(stderrPath, { flags: "a" });
+
+  const child = spawn(runtimePath, ["web", "--port", String(DEFAULT_PORT_SEED), "--foreground"], {
+    cwd: resolvedDataDir,
+    env: { ...process.env, EXECUTOR_DATA_DIR: resolvedDataDir },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => stdoutLog.write(chunk));
+  child.stderr.on("data", (chunk: string) => stderrLog.write(chunk));
+
+  child.once("exit", () => {
+    stdoutLog.end();
+    stderrLog.end();
+  });
+  child.once("close", () => {
+    stdoutLog.end();
+    stderrLog.end();
+  });
+
+  child.unref();
+
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const spawned = await readServerJson(resolvedDataDir);
+    if (spawned && isPidRunning(spawned.pid)) {
+      const healthy = await getHealth(spawned.connection.origin, HEALTH_TIMEOUT_MS).catch(
+        () => false,
+      );
+      if (healthy) {
+        return { baseUrl: spawned.connection.origin };
+      }
+    }
+    await delay(100);
+  }
+
+  if (child.pid && isPidRunning(child.pid)) {
+    try {
+      process.kill(child.pid, "SIGTERM");
+    } catch {}
+    await delay(500);
+    if (isPidRunning(child.pid)) {
+      try {
+        process.kill(child.pid, "SIGKILL");
+      } catch {}
+    }
+  }
+
+  throw new SidecarError(
+    "STARTUP_TIMEOUT",
+    `Global executor startup timed out after ${STARTUP_TIMEOUT_MS}ms`,
+    { port: DEFAULT_PORT_SEED },
+  );
+};
+
+export { ensureGlobalExecutor };
+
 export const findRunningSidecarForCwd = async (
   cwdInput: string,
   dataDir?: string,

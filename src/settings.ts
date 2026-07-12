@@ -100,9 +100,27 @@ export const resolveExecutorSettings = async (cwd: string): Promise<ExecutorSett
   const globalSettings = await readRootSettings(getGlobalSettingsPath());
   const projectSettings = await readRootSettings(getProjectSettingsPath(cwd));
 
-  return mergeSettings(
+  const hasProjectSettings =
+    projectSettings.piExecutor != null &&
+    Object.keys(sanitizeSettings(projectSettings.piExecutor)).length > 0;
+
+  const merged = mergeSettings(
     mergeSettings(getDefaultExecutorSettings(), globalSettings.piExecutor),
     projectSettings.piExecutor,
+  );
+
+  if (!merged.dataDir && !hasProjectSettings) {
+    merged.dataDir = "~/.executor";
+  }
+
+  return merged;
+};
+
+export const hasProjectExecutorSettings = async (cwd: string): Promise<boolean> => {
+  const projectSettings = await readRootSettings(getProjectSettingsPath(cwd));
+  return (
+    projectSettings.piExecutor != null &&
+    Object.keys(sanitizeSettings(projectSettings.piExecutor)).length > 0
   );
 };
 

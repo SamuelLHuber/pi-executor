@@ -97,7 +97,7 @@ discovery and calling pattern.
 
 ## Settings
 
-Configure the extension in `~/.pi/agent/settings.json` or `.pi/settings.json`:
+Configure the extension in `~/.pi/agent/settings.json` (global) or `.pi/settings.json` (project).
 
 ```json
 {
@@ -112,33 +112,63 @@ Configure the extension in `~/.pi/agent/settings.json` or `.pi/settings.json`:
 }
 ```
 
-- `mode`: `"local"` (spawn sidecar) or `"remote"` (connect to existing)
+- `mode`: `"local"` or `"remote"`
 - `autoStart`: connect on session start
 - `remoteUrl`: required for remote mode (e.g. `http://127.0.0.1:4788`)
 - `showFooterStatus`: show the green dot in Pi's footer
 - `stopLocalOnShutdown`: stop Pi-owned sidecars when the session ends
-- `dataDir`: custom data directory for the executor sidecar. When empty, each project gets its own `<cwd>/.executor`. Set to e.g. `"~/.executor"` to share one global executor across all projects
+- `dataDir`: custom data directory for the executor sidecar
 
 You can also manage these interactively with `/executor-settings`.
 
-## Global executor
+## Execution modes
 
-By default every project gets its own sidecar and its own data directory (`<cwd>/.executor`). To run a single shared executor for all projects, set a global `dataDir` in `~/.pi/agent/settings.json`:
+pi-executor supports three modes depending on how you configure it:
+
+### 1. Remote mode
+
+Connect to an existing executor server.
 
 ```json
+// ~/.pi/agent/settings.json
 {
   "piExecutor": {
-    "dataDir": "~/.executor"
+    "mode": "remote",
+    "remoteUrl": "http://127.0.0.1:4788"
   }
 }
 ```
 
-With this setting:
+Pi never starts or stops this server. You run it yourself (e.g. `npx executor web --port 4788`).
 
-- All Pi sessions connect to the same executor instance regardless of cwd
-- Integrations, connections, and auth tokens live in one place (`~/.executor`)
-- The first session that needs executor starts the sidecar; subsequent sessions reuse it
-- Only the session that originally started the sidecar will auto-stop it on shutdown (unless another session explicitly runs `/executor-stop`)
+### 2. Global-local mode (default)
+
+When **no project settings** exist (no `.pi/settings.json` with a `piExecutor` key), Pi uses a **single shared executor** at `~/.executor` on port `4788`.
+
+- The first Pi session that needs executor **checks if it's running**, and if not, **starts it detached**
+- The executor survives Pi restarts because it is **not owned by any Pi session**
+- All projects without explicit overrides share the same instance and the same integrations / connections
+- `/executor-stop` refuses to stop the global executor because it would break other sessions
+
+This is the default behaviour out of the box. You do not need to configure anything.
+
+### 3. Project-local mode
+
+To isolate a specific project, create a `.pi/settings.json` anywhere with any `piExecutor` key:
+
+```json
+{
+  "piExecutor": {
+    "dataDir": "./.executor"
+  }
+}
+```
+
+When a project has **any** explicit executor settings, it gets its own sidecar:
+
+- Its own data directory (defaults to `<cwd>/.executor`)
+- Port scanning to find a free port
+- Full lifecycle ownership — Pi starts it on demand and **can** stop it with `/executor-stop`
 
 ## How to add integrations
 
@@ -220,22 +250,31 @@ return result;
 
 ## Architecture
 
-### Per-cwd data directories
+### Global-local shared instance
 
-Each project gets its own `.executor/` directory (inside the cwd) for data,
-database, and auth tokens. This means:
+By default (no project settings), pi-executor uses a single shared executor at `~/.executor` on port `4788`:
 
-- Multiple Pi sessions in different projects never conflict
-- Each project has its own integrations catalog
-- Auth tokens are scoped per directory, not shared globally
+- The first session that needs executor **checks** if it's running via `server.json` and a health check
+- If missing, it spawns the binary **detached** (`no-hup` style) with logs to `~/.executor/executor.stdout.log`
+- No Pi session "owns" the global executor, so it survives shutdowns and restarts
+- Other sessions simply discover and connect to the existing server
 
-The sidecar spawned by Pi uses `EXECUTOR_DATA_DIR=<cwd>/.executor`.
+This means you can open Pi in many different projects and they all talk to the same executor instance.
+
+### Project-local isolation
+
+When a project has **any explicit settings** in `.pi/settings.json`, it gets full isolation:
+
+- Its own `.executor/` directory inside the project
+- Port scanning from `4788` upwards to find a free one
+- Pi **owns** the lifecycle: starts it on demand, stops it on shutdown, `/executor-stop` works
+- Auth tokens and integrations are scoped per directory
 
 ### Bearer token auto-flow
 
 Current executor gates `/api/*` and `/mcp` behind a bearer token. The extension:
 
-1. Spawns the sidecar
+1. Spawns the sidecar (or connects to an existing one)
 2. Reads the token from `.executor/server-control/auth.json`
 3. Passes it to the MCP client via `Authorization` headers
 4. Includes it in `/executor-web` as `?_token=...` for auto-login
@@ -281,9 +320,11 @@ Another executor process owns `~/.executor`. Either:
 
 ### Multiple Pi sessions
 
-Each session spawns its own sidecar on a different port with its own
-`.executor/` directory. They are fully isolated. If you want a single shared
-executor, run it manually and point all Pi sessions at it via remote mode.
+Sessions in **different projects with no explicit settings** share the **same** global executor at `~/.executor`. No conflicts.
+
+Sessions in **different projects with explicit project settings** run fully isolated sidecars on separate ports. They do not interfere with each other.
+
+If you want to share a single executor across **all** projects but still have Pi manage its lifecycle, switch one project to local mode with default settings and all others to remote mode pointing at it. But in practice, the global-local default handles this automatically.
 
 ## Development
 
