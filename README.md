@@ -124,7 +124,12 @@ You can also manage these interactively with `/executor-settings`.
 
 ## Execution modes
 
-pi-executor supports three modes depending on how you configure it:
+pi-executor supports three modes depending on how you configure it. The mode is
+selected at runtime by evaluating settings in this order:
+
+1. `mode === "remote"` → **Remote mode** (regardless of any other setting)
+2. Project has any explicit `piExecutor` settings in `.pi/settings.json` → **Project-local mode**
+3. Otherwise (no project settings, mode is "local") → **Global-local mode** (default)
 
 ### 1. Remote mode
 
@@ -144,16 +149,33 @@ Pi never starts or stops this server. You run it yourself (e.g. `npx executor we
 
 ### 2. Global-local mode (default)
 
-When **no project settings** exist (no `.pi/settings.json` with a `piExecutor` key), Pi uses a **single shared executor** at `~/.executor` on port `4788`.
+When **no project settings** exist — meaning there is no `.pi/settings.json` file
+*or* the file exists but has no `piExecutor` key — Pi uses a **single shared
+executor** at `~/.executor` on port `4788`.
 
-- `scopeDir` controls which workspace tenant the global executor uses. If your existing integrations were created while running executor inside a specific project, set `scopeDir` to that project's path so the global executor loads them
+This mode is designed so that:
 
-- The first Pi session that needs executor **checks if it's running**, and if not, **starts it detached**
-- The executor survives Pi restarts because it is **not owned by any Pi session**
-- All projects without explicit overrides share the same instance and the same integrations / connections
-- `/executor-stop` refuses to stop the global executor because it would break other sessions
+- You open Pi in many different projects and they all share one executor instance
+- The executor survives Pi restarts
+- No manual `npx executor web` is needed
 
-This is the default behaviour out of the box. You do not need to configure anything.
+Behaviour:
+
+- The first Pi session that needs executor checks `~/.executor/server-control/server.json` and health-checks the port
+- If the server is running, it connects to it
+- If not, it spawns the binary **detached** (`--foreground` with `child.unref()`) so it outlives Pi
+- Logs go to `~/.executor/executor.stdout.log` and `.stderr.log`
+- No Pi session "owns" the server, so `session_shutdown` will not stop it
+- `/executor-stop` explicitly refuses to stop the global executor
+
+`scopeDir` controls which workspace tenant the global executor uses. If your
+existing integrations were created while running executor inside a specific
+project (e.g. `/Users/samuel/git/pi-executor-plugin`), set `scopeDir` to that
+path in global settings so the global executor loads them. Otherwise the server
+starts with an empty default tenant.
+
+This is the default behaviour out of the box. You do not need to configure
+anything.
 
 ### 3. Project-local mode
 
