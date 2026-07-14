@@ -1,3 +1,4 @@
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -71,7 +72,8 @@ const sanitizeSettings = (
 
 const getGlobalSettingsPath = (): string =>
   join(process.env.HOME || homedir(), ".pi", "agent", "settings.json");
-const getProjectSettingsPath = (cwd: string): string => join(resolve(cwd), ".pi", "settings.json");
+const getProjectSettingsPath = (cwd: string): string =>
+  join(resolve(cwd), CONFIG_DIR_NAME, "settings.json");
 
 const getSettingsPath = (cwd: string, scope: SettingsScope): string =>
   scope === "global" ? getGlobalSettingsPath() : getProjectSettingsPath(cwd);
