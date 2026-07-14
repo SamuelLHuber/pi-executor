@@ -39,9 +39,12 @@ export type ExecutorMcpToolResult = {
   isError: boolean;
 };
 
+type ElicitationMode = "model" | "browser" | "native";
+
 type ExecutorMcpClientOptions = {
   hasUI: boolean;
   token?: string;
+  elicitationMode?: ElicitationMode;
   onElicitation?: (request: ExecutorElicitationRequest) => Promise<ExecutorElicitationResponse>;
 };
 
@@ -50,7 +53,7 @@ type ConnectedExecutorMcpClient = {
   execute: (code: string) => Promise<ExecutorMcpToolResult>;
   resume: (
     executionId: string,
-    action: ResumeAction,
+    action?: ResumeAction,
     content?: JsonObject,
   ) => Promise<ExecutorMcpToolResult>;
   close: () => Promise<void>;
@@ -117,8 +120,13 @@ const connectExecutorMcpClient = async (
     { name: "pi-executor", version: "0.0.1" },
     { capabilities: buildCapabilities(options.hasUI) },
   );
+  const mcpUrl = new URL("/mcp", baseUrl);
+  if (options.elicitationMode) {
+    mcpUrl.searchParams.set("elicitation_mode", options.elicitationMode);
+  }
+
   const transport = new StreamableHTTPClientTransport(
-    new URL("/mcp", baseUrl),
+    mcpUrl,
     options.token
       ? {
           requestInit: {
@@ -191,11 +199,13 @@ const connectExecutorMcpClient = async (
       normalizeToolResult(
         await client.callTool({
           name: "resume",
-          arguments: {
-            executionId,
-            action,
-            content: content ? JSON.stringify(content) : "{}",
-          },
+          arguments: action
+            ? {
+                executionId,
+                action,
+                content: content ? JSON.stringify(content) : "{}",
+              }
+            : { executionId },
         }),
       ),
     close: async () => {
@@ -222,5 +232,8 @@ export const inspectExecutorMcp = async (
   baseUrl: string,
   hasUI: boolean,
   token?: string,
+  elicitationMode?: ElicitationMode,
 ): Promise<ExecutorMcpInspection> =>
-  withExecutorMcpClient(baseUrl, { hasUI, token }, async (client) => client.inspect());
+  withExecutorMcpClient(baseUrl, { hasUI, token, elicitationMode }, async (client) =>
+    client.inspect(),
+  );

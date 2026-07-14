@@ -27,7 +27,8 @@ const readExecutionId = (structuredContent: JsonValue): string | undefined => {
     return undefined;
   }
 
-  return structuredContent.status === "waiting_for_interaction" &&
+  return (structuredContent.status === "waiting_for_interaction" ||
+    structuredContent.status === "user_approval_required") &&
     typeof structuredContent.executionId === "string"
     ? structuredContent.executionId
     : undefined;
@@ -68,6 +69,6 @@ export const buildExecutorSystemPrompt = (description: string, hasResume: boolea
     description,
     "",
     hasResume
-      ? "This Pi session has no managed elicitation path available. If execute returns waiting_for_interaction, call resume with the exact executionId."
-      : "This Pi session has UI available. Use execute for Executor work and let it handle any interaction inline. Do not call resume unless execute explicitly cannot complete inline.",
+      ? "Executor approvals happen in the Executor web UI. If execute returns user_approval_required, tell the user to approve in the opened browser page, then call resume with the exact executionId."
+      : "Use execute for Executor work.",
   ].join("\n");

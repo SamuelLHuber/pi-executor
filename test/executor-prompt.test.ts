@@ -163,9 +163,7 @@ describe("executor prompt + tool descriptions", () => {
     const prompt = await loadExecutorPrompt(cwd, true);
 
     expect(prompt).toContain(EXECUTE_DESCRIPTION);
-    expect(prompt).toContain(
-      "Use execute for Executor work and let it handle any interaction inline.",
-    );
+    expect(prompt).toContain("Executor approvals happen in the Executor web UI.");
   });
 
   test("createExecutorTools uses inspected MCP descriptions for execute and resume", async () => {

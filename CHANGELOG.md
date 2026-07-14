@@ -1,5 +1,11 @@
 # pi-executor
 
+## 0.2.4
+
+### Patch Changes
+
+- Use Executor browser approval pages instead of Pi native approval dialogs.
+
 ## 0.2.3
 
 ### Patch Changes

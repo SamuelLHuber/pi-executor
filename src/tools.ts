@@ -1,16 +1,15 @@
-import { StringEnum, Type, type Static } from "@earendil-works/pi-ai";
+import { Type, type Static } from "@earendil-works/pi-ai";
 import {
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { JsonObject, JsonValue } from "./http.ts";
-import type { ResumeAction, ExecutorMcpInspection } from "./mcp-client.ts";
+import type { JsonValue } from "./http.ts";
+import type { ExecutorMcpInspection } from "./mcp-client.ts";
 import { inspectExecutorMcp, withExecutorMcpClient } from "./mcp-client.ts";
 import {
   buildExecutorSystemPrompt,
-  parseJsonContent,
   toToolResult,
   type ExecuteToolDetails,
   type ExecuteToolResult,
@@ -23,65 +22,13 @@ import { findRunningSidecarForCwd } from "./sidecar.ts";
 const DEFAULT_EXECUTE_DESCRIPTION =
   "Execute TypeScript in a sandboxed runtime with access to configured API tools.";
 
-const DEFAULT_RESUME_DESCRIPTION = [
-  "Resume a paused execution using the executionId returned by execute.",
-  "Never call this without user approval unless they explicitly state otherwise.",
-].join("\n");
-
-const jsonStringSchema = Type.String({ description: "Optional JSON-encoded response content" });
+const DEFAULT_RESUME_DESCRIPTION =
+  "Resume a paused Executor execution after the user has completed the browser approval.";
 
 const inspectionCache = new Map<string, Promise<ExecutorMcpInspection | undefined>>();
 
-const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
+const isJsonObject = (value: JsonValue | undefined): value is Record<string, JsonValue> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-const hasSchemaProperties = (schema: JsonObject | undefined): boolean => {
-  if (!schema) {
-    return false;
-  }
-
-  const properties = schema.properties;
-  return isJsonObject(properties) && Object.keys(properties).length > 0;
-};
-
-const buildSchemaTemplate = (schema: JsonObject | undefined): JsonObject => {
-  if (!schema) {
-    return {};
-  }
-
-  const properties = schema.properties;
-  if (!isJsonObject(properties)) {
-    return {};
-  }
-
-  const template: JsonObject = {};
-  for (const [key, value] of Object.entries(properties)) {
-    if (!isJsonObject(value)) {
-      continue;
-    }
-
-    switch (value.type) {
-      case "boolean":
-        template[key] = false;
-        break;
-      case "number":
-      case "integer":
-        template[key] = 0;
-        break;
-      case "array":
-        template[key] = [];
-        break;
-      case "object":
-        template[key] = {};
-        break;
-      default:
-        template[key] = "";
-        break;
-    }
-  }
-
-  return template;
-};
 
 const launchBrowser = async (url: string): Promise<void> => {
   const { spawn } = await import("node:child_process");
@@ -105,60 +52,6 @@ const launchBrowser = async (url: string): Promise<void> => {
       resolveLaunch();
     });
   });
-};
-
-const promptForInteraction = async (
-  interaction: {
-    mode: "form" | "url";
-    message: string;
-    requestedSchema?: JsonObject;
-    url?: string;
-  },
-  ctx: ExtensionContext,
-): Promise<{ action: ResumeAction; content?: JsonObject }> => {
-  if (interaction.mode === "url" && interaction.url) {
-    try {
-      await launchBrowser(interaction.url);
-      ctx.ui.notify(`Opened ${interaction.url}`, "info");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Open this URL manually: ${interaction.url}\n\n${message}`, "warning");
-    }
-
-    const action = await ctx.ui.select(
-      "Executor browser interaction",
-      ["accept", "decline", "cancel"],
-      { timeout: undefined },
-    );
-    return { action: (action as ResumeAction | undefined) ?? "cancel" };
-  }
-
-  if (!hasSchemaProperties(interaction.requestedSchema)) {
-    const action = await ctx.ui.select("Executor interaction", ["accept", "decline", "cancel"], {
-      timeout: undefined,
-    });
-    return { action: (action as ResumeAction | undefined) ?? "cancel" };
-  }
-
-  ctx.ui.notify(interaction.message, "info");
-  const prefill = JSON.stringify(buildSchemaTemplate(interaction.requestedSchema), null, 2);
-  const edited = await ctx.ui.editor("Executor response JSON", prefill);
-  if (edited === undefined) {
-    return { action: "cancel" };
-  }
-
-  const action = await ctx.ui.select("Submit Executor response", ["accept", "decline", "cancel"], {
-    timeout: undefined,
-  });
-  const resolvedAction = (action as ResumeAction | undefined) ?? "cancel";
-  if (resolvedAction !== "accept") {
-    return { action: resolvedAction };
-  }
-
-  return {
-    action: resolvedAction,
-    content: parseJsonContent(edited),
-  };
 };
 
 const buildInspectionCacheKey = (cwd: string, hasUI: boolean): string =>
@@ -195,12 +88,12 @@ const inspectConfiguredExecutor = async (
           return undefined;
         }
 
-        return await inspectExecutorMcp(settings.remoteUrl, hasUI);
+        return await inspectExecutorMcp(settings.remoteUrl, hasUI, undefined, "browser");
       }
 
       if (settings.autoStart) {
         const endpoint = await resolveExecutorEndpoint(cwd);
-        return await inspectExecutorMcp(endpoint.baseUrl, hasUI, endpoint.token);
+        return await inspectExecutorMcp(endpoint.baseUrl, hasUI, endpoint.token, "browser");
       }
 
       const sidecar = await findRunningSidecarForCwd(cwd, settings.dataDir || undefined);
@@ -208,7 +101,7 @@ const inspectConfiguredExecutor = async (
         return undefined;
       }
 
-      return await inspectExecutorMcp(sidecar.baseUrl, hasUI);
+      return await inspectExecutorMcp(sidecar.baseUrl, hasUI, undefined, "browser");
     } catch {
       return undefined;
     }
@@ -260,6 +153,30 @@ const connectExecutor = async (ctx: ExtensionContext) => {
   }
 };
 
+const readApprovalUrl = (value: JsonValue): string | undefined =>
+  isJsonObject(value) && typeof value.approvalUrl === "string" ? value.approvalUrl : undefined;
+
+const openApprovalUrl = async (
+  approvalUrl: string,
+  endpoint: Awaited<ReturnType<typeof connectExecutor>>,
+  ctx: ExtensionContext,
+): Promise<string> => {
+  const url = new URL(approvalUrl, endpoint.baseUrl);
+  if (endpoint.token) {
+    url.searchParams.set("_token", endpoint.token);
+  }
+
+  const href = url.toString();
+  try {
+    await launchBrowser(href);
+    ctx.ui.notify(`Opened Executor approval in browser: ${href}`, "info");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.ui.notify(`Open this Executor approval URL manually:\n${href}\n\n${message}`, "warning");
+  }
+  return href;
+};
+
 const buildExecuteTool = (description: string) =>
   defineTool({
     name: "execute",
@@ -278,34 +195,30 @@ const buildExecuteTool = (description: string) =>
 
       const outcome = await withExecutorMcpClient(
         endpoint.baseUrl,
-        {
-          hasUI: ctx.hasUI,
-          token: endpoint.token,
-          onElicitation: ctx.hasUI
-            ? (interaction) =>
-                promptForInteraction(
-                  interaction.mode === "url"
-                    ? {
-                        mode: "url",
-                        message: interaction.message,
-                        url: interaction.url,
-                      }
-                    : {
-                        mode: "form",
-                        message: interaction.message,
-                        requestedSchema: interaction.requestedSchema,
-                      },
-                  ctx,
-                )
-            : undefined,
-        },
+        { hasUI: ctx.hasUI, token: endpoint.token, elicitationMode: "browser" },
         async (client) => client.execute(params.code),
       );
 
-      return toToolResult(outcome, {
+      const result = toToolResult(outcome, {
         baseUrl: endpoint.baseUrl,
         scopeId: endpoint.token ? `executor-${endpoint.mode}` : undefined,
       });
+
+      const approvalUrl = readApprovalUrl(result.details.structuredContent);
+      if (!approvalUrl) {
+        return result;
+      }
+
+      const openedUrl = await openApprovalUrl(approvalUrl, endpoint, ctx);
+      return {
+        ...result,
+        content: [
+          {
+            type: "text",
+            text: `${result.content[0]?.text ?? "User approval required."}\n\nOpened approval URL: ${openedUrl}`,
+          },
+        ],
+      };
     },
   });
 
@@ -315,25 +228,18 @@ const buildResumeTool = (description: string) =>
     label: "Resume",
     description,
     promptSnippet:
-      "Resume a paused Executor execution after the user has completed the required interaction.",
-    promptGuidelines: ["Use the exact executionId returned by execute."],
+      "Resume a paused Executor execution after the user has completed the browser approval.",
+    promptGuidelines: ["Use the exact executionId returned by execute after browser approval."],
     parameters: Type.Object({
       executionId: Type.String({ description: "The execution ID from the paused result" }),
-      action: StringEnum(["accept", "decline", "cancel"] as const),
-      content: Type.Optional(jsonStringSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<ExecuteToolResult> {
       const endpoint = await connectExecutor(ctx);
 
       const outcome = await withExecutorMcpClient(
         endpoint.baseUrl,
-        { hasUI: false, token: endpoint.token },
-        async (client) =>
-          client.resume(
-            params.executionId,
-            params.action as ResumeAction,
-            parseJsonContent(params.content),
-          ),
+        { hasUI: false, token: endpoint.token, elicitationMode: "browser" },
+        async (client) => client.resume(params.executionId),
       );
 
       return toToolResult(outcome, {
@@ -345,7 +251,7 @@ const buildResumeTool = (description: string) =>
 
 export const loadExecutorPrompt = async (cwd: string, hasUI: boolean): Promise<string> => {
   const { executeDescription } = await loadExecutorDescriptions(cwd, hasUI);
-  return buildExecutorSystemPrompt(executeDescription, !hasUI);
+  return buildExecutorSystemPrompt(executeDescription, true);
 };
 
 export const isExecutorToolDetails = (value: object | null): value is ExecuteToolDetails => {
@@ -366,9 +272,7 @@ export const createExecutorTools = async (
   hasUI: boolean,
 ): Promise<ToolDefinition[]> => {
   const { executeDescription, resumeDescription } = await loadExecutorDescriptions(cwd, hasUI);
-  return hasUI
-    ? [buildExecuteTool(executeDescription)]
-    : [buildExecuteTool(executeDescription), buildResumeTool(resumeDescription)];
+  return [buildExecuteTool(executeDescription), buildResumeTool(resumeDescription)];
 };
 
 export const registerExecutorTools = async (
