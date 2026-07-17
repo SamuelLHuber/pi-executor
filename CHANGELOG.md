@@ -1,5 +1,13 @@
 # pi-executor
 
+## 0.2.6
+
+### Patch Changes
+
+- Document the global-local executor mode fallback more clearly.
+- Apply formatting cleanup to executor command imports.
+- Remove an unused test import so linting passes on the current toolchain.
+
 ## 0.2.4
 
 ### Patch Changes

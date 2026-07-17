@@ -476,7 +476,7 @@ export const isPidRunning = (pid: number): boolean => {
     return true;
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error) {
-      return error.code !== "ESRCH";
+      return error.code !== "ESRCH" && error.code !== "EINVAL";
     }
     return false;
   }

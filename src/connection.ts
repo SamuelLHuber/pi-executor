@@ -1,5 +1,10 @@
 import { resolveExecutorSettings, hasProjectExecutorSettings } from "./settings.ts";
-import { ensureSidecar, ensureGlobalExecutor, readAuthToken, getExecutorDataDir } from "./sidecar.ts";
+import {
+  ensureSidecar,
+  ensureGlobalExecutor,
+  readAuthToken,
+  getExecutorDataDir,
+} from "./sidecar.ts";
 
 export type ExecutorEndpoint = {
   mode: "local" | "remote";

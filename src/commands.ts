@@ -1,7 +1,12 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { JsonObject } from "./http.ts";
 import { resolveExecutorEndpoint } from "./connection.ts";
-import { resolveExecutorSettings, hasProjectExecutorSettings, updateExecutorSettings, type SettingsScope } from "./settings.ts";
+import {
+  resolveExecutorSettings,
+  hasProjectExecutorSettings,
+  updateExecutorSettings,
+  type SettingsScope,
+} from "./settings.ts";
 import { refreshExecutorStatus, renderExecutorStatus, setExecutorState } from "./status.ts";
 import { getExecutorLogPath, SidecarError, stopSidecarForCwd } from "./sidecar.ts";
 

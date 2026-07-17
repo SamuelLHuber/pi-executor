@@ -150,7 +150,7 @@ Pi never starts or stops this server. You run it yourself (e.g. `npx executor we
 ### 2. Global-local mode (default)
 
 When **no project settings** exist — meaning there is no `.pi/settings.json` file
-*or* the file exists but has no `piExecutor` key — Pi uses a **single shared
+_or_ the file exists but has no `piExecutor` key — Pi uses a **single shared
 executor** at `~/.executor` on port `4788`.
 
 This mode is designed so that:
