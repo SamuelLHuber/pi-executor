@@ -2,10 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  resolveExecutorSettings,
-  updateExecutorSettings,
-} from "../src/settings.ts";
+import { resolveExecutorSettings, updateExecutorSettings } from "../src/settings.ts";
 
 const originalHome = process.env.HOME;
 const cleanup: string[] = [];

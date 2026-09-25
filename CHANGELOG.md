@@ -1,5 +1,13 @@
 # pi-executor
 
+## 0.2.7
+
+### Patch Changes
+
+- Register Executor tools and prompt guidance without connecting to Executor during Pi startup.
+- Move auto-start/status checks to background work so slow or failed Executor startup does not block the prompt.
+- Keep explicit `/executor-start`, `/executor-web`, and first `execute`/`resume` calls as the places that synchronously connect and surface failures.
+
 ## 0.2.6
 
 ### Patch Changes

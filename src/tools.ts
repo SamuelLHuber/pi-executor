@@ -3,11 +3,9 @@ import {
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
-  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { JsonValue } from "./http.ts";
-import type { ExecutorMcpInspection } from "./mcp-client.ts";
-import { inspectExecutorMcp, withExecutorMcpClient } from "./mcp-client.ts";
+import { withExecutorMcpClient } from "./mcp-client.ts";
 import {
   buildExecutorSystemPrompt,
   toToolResult,
@@ -17,7 +15,6 @@ import {
 import { resolveExecutorEndpoint } from "./connection.ts";
 import { resolveExecutorSettings } from "./settings.ts";
 import { renderExecutorStatus, setExecutorState } from "./status.ts";
-import { findRunningSidecarForCwd } from "./sidecar.ts";
 
 const DEFAULT_EXECUTE_DESCRIPTION =
   "Execute TypeScript in a sandboxed runtime with access to configured API tools.";
@@ -25,7 +22,7 @@ const DEFAULT_EXECUTE_DESCRIPTION =
 const DEFAULT_RESUME_DESCRIPTION =
   "Resume a paused Executor execution after the user has completed the browser approval.";
 
-const inspectionCache = new Map<string, Promise<ExecutorMcpInspection | undefined>>();
+const DEFAULT_EXECUTOR_PROMPT = buildExecutorSystemPrompt(DEFAULT_EXECUTE_DESCRIPTION, true);
 
 const isJsonObject = (value: JsonValue | undefined): value is Record<string, JsonValue> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -52,83 +49,6 @@ const launchBrowser = async (url: string): Promise<void> => {
       resolveLaunch();
     });
   });
-};
-
-const buildInspectionCacheKey = (cwd: string, hasUI: boolean): string =>
-  `${cwd}:${hasUI ? "ui" : "headless"}`;
-
-const trimToUndefined = (value: string | undefined): string | undefined => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
-
-const readInspectedToolDescription = (
-  inspection: ExecutorMcpInspection | undefined,
-  toolName: string,
-): string | undefined =>
-  trimToUndefined(inspection?.tools.find((tool) => tool.name === toolName)?.description) ??
-  (toolName === "execute" ? trimToUndefined(inspection?.instructions) : undefined);
-
-const inspectConfiguredExecutor = async (
-  cwd: string,
-  hasUI: boolean,
-): Promise<ExecutorMcpInspection | undefined> => {
-  const cacheKey = buildInspectionCacheKey(cwd, hasUI);
-  const cached = inspectionCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const inspectionPromise = (async (): Promise<ExecutorMcpInspection | undefined> => {
-    try {
-      const settings = await resolveExecutorSettings(cwd);
-
-      if (settings.mode === "remote") {
-        if (settings.remoteUrl.length === 0) {
-          return undefined;
-        }
-
-        return await inspectExecutorMcp(settings.remoteUrl, hasUI, undefined, "browser");
-      }
-
-      if (settings.autoStart) {
-        const endpoint = await resolveExecutorEndpoint(cwd);
-        return await inspectExecutorMcp(endpoint.baseUrl, hasUI, endpoint.token, "browser");
-      }
-
-      const sidecar = await findRunningSidecarForCwd(cwd, settings.dataDir || undefined);
-      if (!sidecar) {
-        return undefined;
-      }
-
-      return await inspectExecutorMcp(sidecar.baseUrl, hasUI, undefined, "browser");
-    } catch {
-      return undefined;
-    }
-  })();
-
-  inspectionCache.set(cacheKey, inspectionPromise);
-
-  try {
-    return await inspectionPromise;
-  } catch {
-    inspectionCache.delete(cacheKey);
-    return undefined;
-  }
-};
-
-const loadExecutorDescriptions = async (
-  cwd: string,
-  hasUI: boolean,
-): Promise<{ executeDescription: string; resumeDescription: string }> => {
-  const inspection = await inspectConfiguredExecutor(cwd, hasUI);
-
-  return {
-    executeDescription:
-      readInspectedToolDescription(inspection, "execute") ?? DEFAULT_EXECUTE_DESCRIPTION,
-    resumeDescription:
-      readInspectedToolDescription(inspection, "resume") ?? DEFAULT_RESUME_DESCRIPTION,
-  };
 };
 
 const connectExecutor = async (ctx: ExtensionContext) => {
@@ -177,11 +97,11 @@ const openApprovalUrl = async (
   return href;
 };
 
-const buildExecuteTool = (description: string) =>
+const buildExecuteTool = () =>
   defineTool({
     name: "execute",
     label: "Execute",
-    description,
+    description: DEFAULT_EXECUTE_DESCRIPTION,
     promptSnippet: "Execute TypeScript in Executor's sandboxed runtime with configured API tools.",
     promptGuidelines: [
       "Search inside execute before calling Executor tools directly in code.",
@@ -222,11 +142,11 @@ const buildExecuteTool = (description: string) =>
     },
   });
 
-const buildResumeTool = (description: string) =>
+const buildResumeTool = () =>
   defineTool({
     name: "resume",
     label: "Resume",
-    description,
+    description: DEFAULT_RESUME_DESCRIPTION,
     promptSnippet:
       "Resume a paused Executor execution after the user has completed the browser approval.",
     promptGuidelines: ["Use the exact executionId returned by execute after browser approval."],
@@ -249,10 +169,7 @@ const buildResumeTool = (description: string) =>
     },
   });
 
-export const loadExecutorPrompt = async (cwd: string, hasUI: boolean): Promise<string> => {
-  const { executeDescription } = await loadExecutorDescriptions(cwd, hasUI);
-  return buildExecutorSystemPrompt(executeDescription, true);
-};
+export const loadExecutorPrompt = (): string => DEFAULT_EXECUTOR_PROMPT;
 
 export const isExecutorToolDetails = (value: object | null): value is ExecuteToolDetails => {
   if (!value || !("baseUrl" in value) || !("isError" in value)) {
@@ -267,20 +184,10 @@ export const isExecutorToolDetails = (value: object | null): value is ExecuteToo
   );
 };
 
-export const createExecutorTools = async (
-  cwd: string,
-  hasUI: boolean,
-): Promise<ToolDefinition[]> => {
-  const { executeDescription, resumeDescription } = await loadExecutorDescriptions(cwd, hasUI);
-  return [buildExecuteTool(executeDescription), buildResumeTool(resumeDescription)];
-};
+export const createExecutorTools = () => [buildExecuteTool(), buildResumeTool()];
 
-export const registerExecutorTools = async (
-  pi: ExtensionAPI,
-  cwd: string,
-  hasUI: boolean,
-): Promise<void> => {
-  for (const tool of await createExecutorTools(cwd, hasUI)) {
+export const registerExecutorTools = (pi: ExtensionAPI): void => {
+  for (const tool of createExecutorTools()) {
     pi.registerTool(tool);
   }
 };

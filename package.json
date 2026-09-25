@@ -1,6 +1,6 @@
 {
   "name": "pi-executor",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Pi extension to run executor",
   "keywords": [
     "code-mode",

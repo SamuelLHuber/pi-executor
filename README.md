@@ -37,7 +37,7 @@ Then `/reload` Pi to load the extension.
 
 ## Quick start
 
-After `/reload` you should see a green executor dot in Pi's footer.
+After `/reload`, Pi registers the `execute`/`resume` tools immediately and checks Executor status in the background. If `autoStart` is enabled, startup happens asynchronously so a slow or failed Executor launch does not block the prompt; failures appear in the footer and as a warning.
 
 Open the Executor web UI (auto-authenticated):
 
@@ -113,7 +113,7 @@ Configure the extension in `~/.pi/agent/settings.json` (global) or `.pi/settings
 ```
 
 - `mode`: `"local"` or `"remote"`
-- `autoStart`: connect on session start
+- `autoStart`: connect on session start in the background. The first `execute`/`resume`, `/executor-start`, or `/executor-web` call will still synchronously connect/start Executor if needed.
 - `remoteUrl`: required for remote mode (e.g. `http://127.0.0.1:4788`)
 - `showFooterStatus`: show the green dot in Pi's footer
 - `stopLocalOnShutdown`: stop Pi-owned sidecars when the session ends
