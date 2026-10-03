@@ -11,6 +11,8 @@ export type ExecuteToolDetails = {
 export type ExecuteToolResult = {
   content: Array<{ type: "text"; text: string }>;
   details: ExecuteToolDetails;
+  structuredContent: { result: JsonValue };
+  isError: boolean;
 };
 
 type ExecutorToolOutcome = {
@@ -54,6 +56,8 @@ export const toToolResult = (
   meta: { baseUrl: string; scopeId?: string },
 ): ExecuteToolResult => ({
   content: [{ type: "text", text: outcome.text }],
+  structuredContent: { result: outcome.structuredContent },
+  isError: outcome.isError,
   details: {
     baseUrl: meta.baseUrl,
     scopeId: meta.scopeId,

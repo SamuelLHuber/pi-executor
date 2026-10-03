@@ -1,5 +1,16 @@
 # pi-executor
 
+## 0.3.0 — 2026-10-03
+
+- Use a structured prompt section instead of replacing the leading system prompt.
+- Expose Executor's orchestration/approval tools as model-only to avoid nesting them inside native codemode.
+- Declare structured output and return host-level error flags while retaining rendering details and exact approval IDs.
+- Never adopt a reused port when the registered process has exited.
+- Update discovery skill examples to the current integrations API and search-result envelope.
+- Pin Pi 1.0.0 development dependencies.
+
+Verification: 24 passing Bun tests, TypeScript, formatting and lint checks; real Pi 1.0 extension-loader smoke check. Live read-only integration inventory confirmed five MCP and two OpenAPI integrations. Approval/resume transport is fixture-tested; no real mutation was performed.
+
 ## 0.2.7
 
 ### Patch Changes

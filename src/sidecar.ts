@@ -865,6 +865,12 @@ export const findRunningSidecarForCwd = async (
 
   const registered = await getRegisteredSidecar(cwd, registryKey);
   if (registered) {
+    // A reused port is not proof of process ownership. Never adopt or stop its
+    // new occupant after the recorded process has exited.
+    if (!isPidRunning(registered.pid)) {
+      await unregisterSidecarForCwd(cwd, registered.pid, registryKey);
+      return undefined;
+    }
     const record = await hydrateRegisteredPid({
       cwd,
       registryKey,

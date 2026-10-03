@@ -107,6 +107,8 @@ const buildExecuteTool = () =>
       "Search inside execute before calling Executor tools directly in code.",
       "Use execute instead of top-level helper tools for Executor discovery and invocation.",
     ],
+    exposure: "model-only",
+    outputSchema: Type.Object({ result: Type.Unknown() }),
     parameters: Type.Object({
       code: Type.String({ description: "JavaScript code to execute" }),
     }),
@@ -150,6 +152,8 @@ const buildResumeTool = () =>
     promptSnippet:
       "Resume a paused Executor execution after the user has completed the browser approval.",
     promptGuidelines: ["Use the exact executionId returned by execute after browser approval."],
+    exposure: "model-only",
+    outputSchema: Type.Object({ result: Type.Unknown() }),
     parameters: Type.Object({
       executionId: Type.String({ description: "The execution ID from the paused result" }),
     }),

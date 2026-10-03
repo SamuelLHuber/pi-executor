@@ -4,7 +4,7 @@ description: >-
   Load this skill before using the `execute` tool. It teaches the Executor sandbox
   calling model: discover tools with `tools.search({ query, limit })`, inspect them
   with `tools.describe.tool({ path })`, inspect configured sources with
-  `tools.executor.sources.list({})`, then call the real tool as
+  `tools.executor.coreTools.integrations.list({})`, then call the real tool as
   `tools.<namespace>.<tool>(args)`. Use when working with third-party services,
   SaaS APIs, MCP/OpenAPI/GraphQL tools, auth-managed actions, or remote data that
   should go through Executor instead of direct shell scripts or ad hoc HTTP code.
@@ -41,7 +41,7 @@ Inside `execute`:
 - Built-in helper paths are:
   - `tools.search({ query, namespace?, limit? })`
   - `tools.describe.tool({ path })`
-  - `tools.executor.sources.list({ query?, limit? })`
+  - `tools.executor.coreTools.integrations.list({})`
 
 ## Non-negotiable workflow
 
@@ -57,7 +57,7 @@ Follow this order inside every `execute` snippet unless you already know the exa
 
 ```ts
 const matches = await tools.search({ query: "linear issues", limit: 5 });
-const path = matches[0]?.path;
+const path = matches.items[0]?.path;
 if (!path) return "No matching tools found.";
 
 const details = await tools.describe.tool({ path });
@@ -115,7 +115,7 @@ return unwrap(raw);
 - Always pass an **object** to helper tools.
 - Always use the **full namespace prefix** when invoking the real tool.
 - Use `tools.describe.tool({ path })` before invoking unfamiliar tools.
-- Use `tools.executor.sources.list({})` when you need source inventory or namespace confirmation.
+- Use `tools.executor.coreTools.integrations.list({})` when you need source inventory or namespace confirmation.
 - Let `execute` handle inline elicitation in Pi UI sessions.
 
 ### Forbidden

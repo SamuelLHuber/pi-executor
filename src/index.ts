@@ -41,9 +41,9 @@ export default function (pi: ExtensionAPI): void {
     });
   });
 
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${loadExecutorPrompt()}`,
-  }));
+  pi.on("before_agent_start", (event) => {
+    event.systemPromptOptions.sections.executor = loadExecutorPrompt();
+  });
 
   pi.on("tool_result", async (event) => {
     if (
